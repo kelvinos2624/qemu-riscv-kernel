@@ -8,6 +8,10 @@ threads, and retire exited threads.
 
 Timer interrupts continue to run, but they do not preempt threads yet.
 
+All threads in this milestone run in RISC-V machine mode. They are kernel
+threads, not user tasks: there is no address-space separation, user stack,
+`sret` path, page-table switch, or syscall boundary yet.
+
 ## Public API
 
 ```c
@@ -38,6 +42,9 @@ mechanism:
 This keeps the scheduler invariant simple: `pick_next_thread()` always returns
 a thread. Re-entering the scheduler after `wfi` also prepares the idle path for
 future timer-driven wakeups.
+
+The null task prints a one-time idle banner when it first runs so the QEMU smoke
+test can prove that exited real threads fall back to the idle path.
 
 ## Thread Storage
 
@@ -83,9 +90,23 @@ On first schedule:
 
 ## Scheduler Policy
 
-The scheduler uses cooperative round-robin across non-null threads. The null
-task is not part of normal rotation; it is selected only when no real thread is
-ready.
+The scheduler currently uses cooperative circular TID round-robin across
+non-null threads. There is no explicit FIFO ready queue yet. On each scheduling
+decision, the kernel scans for the first ready thread after the current TID,
+wrapping from the maximum TID back to 1.
+
+This makes the tie-break rule deterministic: among multiple ready threads, the
+ready thread nearest after the current TID wins. The null task is not part of
+normal rotation; it is selected only when no real thread is ready.
+
+The current running thread is marked ready only after the next thread has been
+selected. In this implementation, that is what prevents a yielding thread from
+immediately selecting itself when another ready thread exists.
+
+Future blocking, wakeup, and preemption work should replace this scan with an
+explicit ready queue. That will let the kernel define textbook round-robin
+semantics more precisely: newly ready threads append to the queue tail, yielding
+threads re-enter at the tail, and the scheduler runs the thread at the head.
 
 Thread states for this milestone:
 
