@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-smoke-test:
+    name: QEMU smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install RISC-V and QEMU tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-riscv64-unknown-elf \
+            gcc-riscv64-unknown-elf \
+            qemu-system-misc
+
+      - name: Check required tools
+        run: make toolcheck
+
+      - name: Build kernel
+        run: make all
+
+      - name: Run QEMU smoke test
+        run: make test
