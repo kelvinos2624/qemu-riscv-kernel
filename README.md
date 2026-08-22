@@ -31,6 +31,7 @@ The project is designed to show practical understanding of:
 - Architecture: RISC-V 64-bit
 - Machine: QEMU `virt`
 - Initial privilege mode: machine mode
+- ISA baseline: `rv64imac_zicsr`
 - Firmware: none, using QEMU `-bios none`
 - Kernel load address: `0x80000000`
 - Console: QEMU `virt` 16550 UART at `0x10000000`
@@ -52,12 +53,35 @@ Milestone 1 is complete:
 - panic path
 - QEMU boot test that validates the milestone banner
 
+Trap-vector setup is complete:
+
+- direct machine-mode trap vector
+- full trap frame for general-purpose registers and machine CSRs
+- C trap handler
+- controlled `ecall` self-test for trap return
+
+Timer interrupt setup is complete:
+
+- QEMU `virt` machine timer MMIO
+- `mtimecmp` programming
+- `mie.MTIE` and `mstatus.MIE` enablement
+- machine-timer interrupt dispatch through the trap handler
+- monotonic kernel tick counter
+
+Cooperative kernel threads are the next milestone.
+
 Expected boot output:
 
 ```text
 qemu-rtos: booting RISC-V kernel
 kernel_start=0x0000000080000000 kernel_end=... stack_top=...
 milestone 1: boot, stack, bss, uart console
+trap: mtvec=...
+trap: self-test passed
+milestone 2: trap vector setup
+timer: interval=...
+timer: observed ... ticks
+milestone 2: timer interrupt setup
 ```
 
 ## Planned Architecture
@@ -150,7 +174,7 @@ Run it in QEMU:
 make run
 ```
 
-Run the current integration test:
+Run the current QEMU smoke test:
 
 ```sh
 make test

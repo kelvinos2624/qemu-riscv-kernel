@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 
-import subprocess
 import select
+import subprocess
 import sys
 import time
 
 
-EXPECTED = "milestone 1: boot, stack, bss, uart console"
+EXPECTED = "milestone 2: timer interrupt setup"
 TIMEOUT_SECONDS = 5.0
 
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: boot_test.py <qemu-system-riscv64> <kernel.elf>", file=sys.stderr)
+        print("usage: qemu_smoke_test.py <qemu-system-riscv64> <kernel.elf>", file=sys.stderr)
         return 2
 
     qemu = sys.argv[1]
@@ -53,7 +53,7 @@ def main() -> int:
                     if line:
                         output.append(line)
                         if EXPECTED in line:
-                            print("boot test: observed milestone banner")
+                            print("qemu smoke test: observed timer milestone banner")
                             return 0
 
             if proc.poll() is not None:
@@ -67,7 +67,7 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("boot test: did not observe milestone banner", file=sys.stderr)
+    print("qemu smoke test: did not observe timer milestone banner", file=sys.stderr)
     print("".join(output), file=sys.stderr)
     return 1
 

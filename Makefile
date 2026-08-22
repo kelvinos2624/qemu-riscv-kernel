@@ -16,7 +16,7 @@ KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 KERNEL_MAP := $(BUILD_DIR)/kernel.map
 
-ARCH_CFLAGS := -march=rv64imac -mabi=lp64 -mcmodel=medany
+ARCH_CFLAGS := -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany
 COMMON_CFLAGS := -ffreestanding -fno-common -fno-builtin -fno-stack-protector
 COMMON_CFLAGS += -Wall -Wextra -Werror -O2 -g
 CFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Ikernel
@@ -25,15 +25,18 @@ LDFLAGS := -T linker.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(KERNEL_MAP)
 
 KERNEL_SRCS := \
 	kernel/arch/riscv64/boot.S \
+	kernel/arch/riscv64/trap.S \
 	kernel/core/main.c \
 	kernel/core/panic.c \
+	kernel/core/trap.c \
+	kernel/drivers/timer.c \
 	kernel/drivers/uart.c
 
 KERNEL_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(KERNEL_SRCS)))
 KERNEL_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(KERNEL_SRCS)))
 DEPS := $(KERNEL_OBJS:.o=.d)
 
-.PHONY: all run debug test clean toolcheck
+.PHONY: all run debug test boot-test clean toolcheck
 
 all: $(KERNEL_ELF) $(KERNEL_BIN)
 
@@ -49,7 +52,9 @@ debug: $(KERNEL_ELF)
 	$(QEMU) -machine virt -m 128M -smp 1 -nographic -bios none -kernel $(KERNEL_ELF) -S -s
 
 test: $(KERNEL_ELF)
-	python3 tools/boot_test.py $(QEMU) $(KERNEL_ELF)
+	python3 tools/qemu_smoke_test.py $(QEMU) $(KERNEL_ELF)
+
+boot-test: test
 
 $(KERNEL_ELF): $(KERNEL_OBJS) linker.ld
 	@mkdir -p $(dir $@)

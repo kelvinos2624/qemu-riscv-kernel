@@ -31,7 +31,5 @@ or static device-table discovery.
 
 ## Next Work
 
-- Add trap vector setup.
-- Add panic diagnostics for trap causes.
 - Add timer initialization.
 - Extend boot integration coverage beyond the milestone banner.
