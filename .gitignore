@@ -1,0 +1,9 @@
+build/
+systems_kernel_project_manual.md
+*.o
+*.elf
+*.bin
+*.map
+*.d
+*.log
+.DS_Store
