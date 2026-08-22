@@ -40,7 +40,6 @@ deadlines.
 ## Next Work
 
 - Add a sleep queue based on timer ticks.
-- Add cooperative kernel threads.
 - Use timer interrupts to preempt the running thread.
 - Decide whether scheduler time accounting uses fixed ticks or absolute
   timestamps.

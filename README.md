@@ -68,7 +68,17 @@ Timer interrupt setup is complete:
 - machine-timer interrupt dispatch through the trap handler
 - monotonic kernel tick counter
 
-Cooperative kernel threads are the next milestone.
+Cooperative kernel thread setup is complete:
+
+- `thread_init()` / `thread_start()` lifecycle
+- reserved TID 0 null task
+- static per-thread kernel stacks
+- cooperative round-robin `thread_yield()`
+- `thread_exit()` for retiring finished threads
+- RISC-V assembly context switch
+- interrupt masking around scheduler state
+
+Preemptive round-robin is the next milestone.
 
 Expected boot output:
 
@@ -82,6 +92,15 @@ milestone 2: trap vector setup
 timer: interval=...
 timer: observed ... ticks
 milestone 2: timer interrupt setup
+thread: initialized static table, null tid=0
+thread: starting scheduler
+thread: A0
+thread: B0
+thread: A1
+thread: B1
+thread: A2
+thread: B2
+milestone 3: cooperative kernel threads
 ```
 
 ## Planned Architecture
@@ -193,7 +212,8 @@ make toolcheck
 ## Testing Strategy
 
 The project will favor repeatable tests over manual observation. The first test
-is a black-box QEMU boot test that waits for the kernel's UART banner.
+is a black-box QEMU integration test that waits for the latest milestone banner
+on the kernel's UART output.
 
 Planned test categories:
 

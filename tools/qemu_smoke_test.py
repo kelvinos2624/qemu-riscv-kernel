@@ -6,7 +6,7 @@ import sys
 import time
 
 
-EXPECTED = "milestone 2: timer interrupt setup"
+EXPECTED = "milestone 3: cooperative kernel threads"
 TIMEOUT_SECONDS = 5.0
 
 
@@ -53,7 +53,7 @@ def main() -> int:
                     if line:
                         output.append(line)
                         if EXPECTED in line:
-                            print("qemu smoke test: observed timer milestone banner")
+                            print("qemu smoke test: observed cooperative thread milestone banner")
                             return 0
 
             if proc.poll() is not None:
@@ -67,7 +67,7 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe timer milestone banner", file=sys.stderr)
+    print("qemu smoke test: did not observe cooperative thread milestone banner", file=sys.stderr)
     print("".join(output), file=sys.stderr)
     return 1
 
