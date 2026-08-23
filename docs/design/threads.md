@@ -20,12 +20,16 @@ int thread_create(const char *name, void (*entry)(void *), void *arg);
 void thread_start(void);
 void thread_yield(void);
 void thread_exit(void);
-int thread_current_tid(void);
+tid_t thread_current_tid(void);
 ```
 
 The shape intentionally resembles the ECE350 RTX split between kernel
 initialization, task creation, kernel start, yield, exit, and current-task ID.
 The names are kernel-oriented rather than course API names.
+
+Thread identity uses `tid_t`, a kernel-owned 16-bit TID type. The current static
+thread table is still limited to `THREAD_MAX`, but the identity type is separate
+from the implementation's table index and from C's generic `int` return codes.
 
 ## Null Task
 
@@ -48,14 +52,31 @@ test can prove that exited real threads fall back to the idle path.
 
 ## Thread Storage
 
-Threads use a static table and static kernel stacks:
+Threads use a static table, static kernel stacks, and a bounded FIFO ready
+queue:
 
 - `THREAD_MAX`: 8, including the null task
 - `THREAD_STACK_SIZE`: 4096 bytes
+- ready queue capacity: `THREAD_MAX - 1`
 
 Static stacks keep this milestone deterministic and independent of the memory
 allocator milestone. Dynamic stack allocation should be introduced after the
 kernel has a heap or page allocator.
+
+The ready queue stores TIDs rather than `thread_t *` pointers. The TCB table
+owns thread storage; queues own scheduling order.
+
+Each TCB also tracks its current queue owner:
+
+- `THREAD_QUEUE_NONE`
+- `THREAD_QUEUE_READY`
+- `THREAD_QUEUE_SLEEP`
+- `THREAD_QUEUE_WAIT`
+
+Only `THREAD_QUEUE_READY` is active in this milestone. The sleep and wait
+members are reserved so future sleep queues and wait queues can use the same
+"one queue owner per thread" invariant instead of adding ad hoc duplicate
+checks later.
 
 ## Context Switching
 
@@ -90,23 +111,24 @@ On first schedule:
 
 ## Scheduler Policy
 
-The scheduler currently uses cooperative circular TID round-robin across
-non-null threads. There is no explicit FIFO ready queue yet. On each scheduling
-decision, the kernel scans for the first ready thread after the current TID,
-wrapping from the maximum TID back to 1.
+The scheduler currently uses cooperative FIFO round-robin over a bounded ready
+queue. The queue contains real runnable threads only. TID 0, the null task, is
+never enqueued and is selected only when the ready queue is empty.
 
-This makes the tie-break rule deterministic: among multiple ready threads, the
-ready thread nearest after the current TID wins. The null task is not part of
-normal rotation; it is selected only when no real thread is ready.
+Queue semantics:
 
-The current running thread is marked ready only after the next thread has been
-selected. In this implementation, that is what prevents a yielding thread from
-immediately selecting itself when another ready thread exists.
+- `thread_create()` marks a new real thread `THREAD_READY` and appends it to the
+  ready queue tail.
+- `thread_yield()` marks the current real running thread `THREAD_READY`, appends
+  it to the ready queue tail, then pops the next TID from the ready queue head.
+- `thread_exit()` marks the current real thread `THREAD_EXITED` and does not
+  requeue it.
+- if the ready queue is empty, `pick_next_thread()` returns the null task.
 
-Future blocking, wakeup, and preemption work should replace this scan with an
-explicit ready queue. That will let the kernel define textbook round-robin
-semantics more precisely: newly ready threads append to the queue tail, yielding
-threads re-enter at the tail, and the scheduler runs the thread at the head.
+This makes the tie-break rule arrival order into the ready queue, not static TID
+order. It is the scheduler shape needed for later timer preemption: a preempted
+thread can become ready, re-enter at the tail, and the next runnable thread can
+be selected from the head.
 
 Thread states for this milestone:
 

@@ -40,7 +40,7 @@ static void demo_thread_c(void *arg)
     console_write("thread: C1\n");
     thread_yield();
     console_write("thread: C2\n");
-    console_write("milestone 3: cooperative kernel threads\n");
+    console_write("milestone 4: bounded ready queue scheduler core\n");
     thread_exit();
 }
 

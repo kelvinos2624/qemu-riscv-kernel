@@ -73,12 +73,14 @@ Cooperative kernel thread setup is complete:
 - `thread_init()` / `thread_start()` lifecycle
 - reserved TID 0 null task
 - static per-thread kernel stacks
-- cooperative circular TID round-robin `thread_yield()`
+- bounded FIFO ready queue over real thread IDs
+- cooperative FIFO round-robin `thread_yield()`
+- queue ownership tracking to prevent duplicate ready-queue entries
 - `thread_exit()` for retiring finished threads
 - RISC-V assembly context switch
 - interrupt masking around scheduler state
 
-Preemptive round-robin is the next milestone.
+Timer-driven preemptive round-robin is the next milestone.
 
 Expected boot output:
 
@@ -103,7 +105,7 @@ thread: C1
 thread: A2
 thread: B2
 thread: C2
-milestone 3: cooperative kernel threads
+milestone 4: bounded ready queue scheduler core
 thread: null idle
 ```
 
@@ -218,7 +220,7 @@ make toolcheck
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
 the kernel's UART output. It currently checks the cooperative thread rotation
-order, which exercises the circular TID round-robin policy without requiring an
+order, which exercises the FIFO ready-queue round-robin policy without requiring an
 in-kernel unit-test framework.
 
 Planned test categories:

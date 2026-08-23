@@ -16,7 +16,7 @@ EXPECTED_SEQUENCE = [
     "thread: A2",
     "thread: B2",
     "thread: C2",
-    "milestone 3: cooperative kernel threads",
+    "milestone 4: bounded ready queue scheduler core",
     "thread: null idle",
 ]
 TIMEOUT_SECONDS = 5.0
@@ -27,7 +27,7 @@ def is_relevant_line(line: str) -> bool:
         line.startswith("thread: A")
         or line.startswith("thread: B")
         or line.startswith("thread: C")
-        or line.startswith("milestone 3:")
+        or line.startswith("milestone 4:")
         or line.startswith("thread: null idle")
     )
 
@@ -93,7 +93,7 @@ def main() -> int:
                                 return 1
                             expected_index += 1
                         if expected_index == len(EXPECTED_SEQUENCE):
-                            print("qemu smoke test: observed circular TID round-robin sequence")
+                            print("qemu smoke test: observed FIFO ready-queue round-robin sequence")
                             return 0
 
             if proc.poll() is not None:
@@ -107,7 +107,7 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe circular TID round-robin sequence", file=sys.stderr)
+    print("qemu smoke test: did not observe FIFO ready-queue round-robin sequence", file=sys.stderr)
     print(
         f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
         file=sys.stderr,
