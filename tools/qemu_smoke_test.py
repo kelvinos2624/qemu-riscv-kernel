@@ -7,16 +7,10 @@ import time
 
 
 EXPECTED_SEQUENCE = [
-    "thread: A0",
-    "thread: B0",
-    "thread: C0",
-    "thread: A1",
-    "thread: B1",
-    "thread: C1",
-    "thread: A2",
-    "thread: B2",
-    "thread: C2",
-    "milestone 4: bounded ready queue scheduler core",
+    "thread: hog start",
+    "thread: peer ran without yield",
+    "thread: hog done",
+    "milestone 5: timer preemption",
     "thread: null idle",
 ]
 TIMEOUT_SECONDS = 5.0
@@ -24,10 +18,9 @@ TIMEOUT_SECONDS = 5.0
 
 def is_relevant_line(line: str) -> bool:
     return (
-        line.startswith("thread: A")
-        or line.startswith("thread: B")
-        or line.startswith("thread: C")
-        or line.startswith("milestone 4:")
+        line.startswith("thread: hog")
+        or line.startswith("thread: peer")
+        or line.startswith("milestone 5:")
         or line.startswith("thread: null idle")
     )
 
@@ -93,7 +86,7 @@ def main() -> int:
                                 return 1
                             expected_index += 1
                         if expected_index == len(EXPECTED_SEQUENCE):
-                            print("qemu smoke test: observed FIFO ready-queue round-robin sequence")
+                            print("qemu smoke test: observed timer preemption sequence")
                             return 0
 
             if proc.poll() is not None:
@@ -107,7 +100,7 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe FIFO ready-queue round-robin sequence", file=sys.stderr)
+    print("qemu smoke test: did not observe timer preemption sequence", file=sys.stderr)
     print(
         f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
         file=sys.stderr,

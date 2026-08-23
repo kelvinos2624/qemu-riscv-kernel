@@ -11,11 +11,13 @@ static void demo_thread_a(void *arg)
 {
     (void)arg;
 
-    console_write("thread: A0\n");
-    thread_yield();
-    console_write("thread: A1\n");
-    thread_yield();
-    console_write("thread: A2\n");
+    console_write("thread: hog start\n");
+    const uint64_t start_ticks = timer_ticks();
+    while (timer_ticks() - start_ticks < THREAD_QUANTUM_TICKS + 2u) {
+        __asm__ volatile("" ::: "memory");
+    }
+    console_write("thread: hog done\n");
+    console_write("milestone 5: timer preemption\n");
     thread_exit();
 }
 
@@ -23,24 +25,7 @@ static void demo_thread_b(void *arg)
 {
     (void)arg;
 
-    console_write("thread: B0\n");
-    thread_yield();
-    console_write("thread: B1\n");
-    thread_yield();
-    console_write("thread: B2\n");
-    thread_exit();
-}
-
-static void demo_thread_c(void *arg)
-{
-    (void)arg;
-
-    console_write("thread: C0\n");
-    thread_yield();
-    console_write("thread: C1\n");
-    thread_yield();
-    console_write("thread: C2\n");
-    console_write("milestone 4: bounded ready queue scheduler core\n");
+    console_write("thread: peer ran without yield\n");
     thread_exit();
 }
 
@@ -76,9 +61,6 @@ void kmain(void)
     }
     if (thread_create("demo-b", demo_thread_b, NULL) < 0) {
         PANIC("failed to create demo-b");
-    }
-    if (thread_create("demo-c", demo_thread_c, NULL) < 0) {
-        PANIC("failed to create demo-c");
     }
     thread_start();
 }

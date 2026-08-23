@@ -2,11 +2,10 @@
 
 ## Scope
 
-This milestone adds cooperative kernel threads. The kernel can initialize a
-thread subsystem, create threads, start scheduling, voluntarily yield between
-threads, and retire exited threads.
-
-Timer interrupts continue to run, but they do not preempt threads yet.
+This milestone adds machine-mode kernel threads with FIFO round-robin
+scheduling. The kernel can initialize a thread subsystem, create threads, start
+scheduling, voluntarily yield between threads, preempt CPU-bound threads from
+the timer interrupt path, and retire exited threads.
 
 All threads in this milestone run in RISC-V machine mode. They are kernel
 threads, not user tasks: there is no address-space separation, user stack,
@@ -80,55 +79,63 @@ checks later.
 
 ## Context Switching
 
-Cooperative switches use `context_switch(uintptr_t *old_sp, uintptr_t new_sp)`.
-The assembly routine saves:
+Thread switches now use trap-frame ownership. Each thread has a saved
+`trap_frame_t *` in its TCB. When a thread is interrupted, yields, or exits
+through the machine-mode `ecall` path, the trap entry has already saved the full
+interrupted machine state. The scheduler can keep that frame on the outgoing
+thread's stack and return a different thread's frame to the assembly restore
+path.
 
-- `ra`
-- `s0` through `s11`
-- the resulting stack pointer
+The timer interrupt handler does not call `thread_yield()` and does not run
+ready-queue policy directly. It updates timer state and notifies the scheduler
+tick hook. The trap handler then checks whether returning to a different thread
+is allowed.
 
-This is enough for cooperative kernel threads because `thread_yield()` is a
-normal C call and the RISC-V ABI already treats `a0-a7` and `t0-t6` as
-caller-saved.
-
-This is intentionally separate from trap handling. Trap entry saves fuller
-machine state because interrupts and exceptions can happen between arbitrary
-instructions.
+This mirrors the ECE350/STM32 RTOS split between SysTick and PendSV: the timer
+interrupt provides periodic control, while the actual context switch is deferred
+to a controlled exception-return boundary. RISC-V does not provide PendSV here,
+so the kernel uses the trap return path as that boundary.
 
 ## Initial Thread Stack
 
-A newly created thread has never called `context_switch()`, so
-`thread_create()` builds a fake switch frame on the new thread's stack. The
-saved `ra` points at `thread_trampoline()`.
+A newly created thread has never trapped or been preempted, so
+`thread_create()` builds a synthetic trap frame on the new thread's stack. The
+saved `mepc` points at `thread_trampoline()`, and the saved `sp` points at the
+top of the thread's kernel stack.
 
 On first schedule:
 
-1. `context_switch()` loads the new stack.
-2. It restores `ra` from the fake frame.
-3. `ret` enters `thread_trampoline()`.
+1. `trap_restore()` loads the selected trap frame.
+2. It restores `mepc`, `mstatus`, general-purpose registers, and `sp`.
+3. `mret` enters `thread_trampoline()`.
 4. The trampoline calls the thread entry function.
 5. If the entry function returns, the trampoline calls `thread_exit()`.
 
 ## Scheduler Policy
 
-The scheduler currently uses cooperative FIFO round-robin over a bounded ready
-queue. The queue contains real runnable threads only. TID 0, the null task, is
-never enqueued and is selected only when the ready queue is empty.
+The scheduler uses FIFO round-robin over a bounded ready queue. The queue
+contains real runnable threads only. TID 0, the null task, is never enqueued and
+is selected only when the ready queue is empty.
 
 Queue semantics:
 
 - `thread_create()` marks a new real thread `THREAD_READY` and appends it to the
   ready queue tail.
-- `thread_yield()` marks the current real running thread `THREAD_READY`, appends
-  it to the ready queue tail, then pops the next TID from the ready queue head.
+- `thread_yield()` enters the trap path with a machine-mode `ecall`; the trap
+  scheduler marks the current real running thread `THREAD_READY`, appends it to
+  the ready queue tail, then pops the next TID from the ready queue head.
+- timer ticks increment the current thread's quantum counter. Once it reaches
+  `THREAD_QUANTUM_TICKS`, the scheduler requests preemption.
 - `thread_exit()` marks the current real thread `THREAD_EXITED` and does not
   requeue it.
 - if the ready queue is empty, `pick_next_thread()` returns the null task.
 
 This makes the tie-break rule arrival order into the ready queue, not static TID
-order. It is the scheduler shape needed for later timer preemption: a preempted
-thread can become ready, re-enter at the tail, and the next runnable thread can
-be selected from the head.
+order. A preempted thread becomes ready, re-enters at the tail, and the next
+runnable thread is selected from the head.
+
+`THREAD_QUANTUM_TICKS` is 10. With the current 1 ms QEMU timer tick, the
+scheduler quantum is approximately 10 ms.
 
 Thread states for this milestone:
 
@@ -143,7 +150,12 @@ Blocking and sleeping states come later.
 
 Scheduler state mutations are protected with `irq_save()` and `irq_restore()`.
 This prevents a machine-timer interrupt from observing or acting on partial
-scheduler state during `thread_create()`, `thread_yield()`, or `thread_exit()`.
+scheduler state during ready-queue and TCB transitions.
+
+The kernel also tracks a small `preempt_disable_depth`. Timer ticks continue to
+increment while preemption is disabled, but the scheduling effect is deferred
+until preemption is allowed. In other words, the kernel disables preemption, not
+timekeeping.
 
 For this uniprocessor milestone, masking interrupts is sufficient. A future SMP
 kernel would need spinlocks in addition to interrupt masking.
@@ -152,5 +164,4 @@ kernel would need spinlocks in addition to interrupt masking.
 
 - Add blocked and sleeping states.
 - Add a sleep queue driven by timer ticks.
-- Add preemptive round-robin from the machine-timer interrupt.
 - Add scheduler tracing for context switch events.

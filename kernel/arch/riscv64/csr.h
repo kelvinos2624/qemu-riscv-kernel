@@ -7,6 +7,8 @@
 #define MCAUSE_CODE_MASK (~MCAUSE_INTERRUPT)
 
 #define MSTATUS_MIE (1u << 3)
+#define MSTATUS_MPIE (1u << 7)
+#define MSTATUS_MPP_M ((uint64_t)3 << 11)
 #define MIE_MTIE (1u << 7)
 
 #define MCAUSE_MACHINE_TIMER_INTERRUPT 7

@@ -1,5 +1,6 @@
 .section .text
 .globl trap_entry
+.globl trap_restore
 
 .equ TF_RA,      0
 .equ TF_SP,      8
@@ -86,7 +87,9 @@ trap_entry:
 
     mv a0, sp
     call trap_handle
+    mv sp, a0
 
+trap_restore_frame:
     ld t0, TF_MEPC(sp)
     csrw mepc, t0
     ld t0, TF_MSTATUS(sp)
@@ -124,3 +127,7 @@ trap_entry:
     ld t6, TF_T6(sp)
     ld sp, TF_SP(sp)
     mret
+
+trap_restore:
+    mv sp, a0
+    j trap_restore_frame

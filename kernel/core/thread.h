@@ -7,8 +7,10 @@
 #define THREAD_INVALID_TID UINT16_MAX
 #define THREAD_MAX 8
 #define THREAD_STACK_SIZE 4096
+#define THREAD_QUANTUM_TICKS 10
 
 typedef uint16_t tid_t;
+struct trap_frame;
 
 typedef enum {
     THREAD_UNUSED = 0,
@@ -29,6 +31,8 @@ typedef struct thread {
     thread_state_t state;
     thread_queue_t queue;
     uintptr_t kernel_sp;
+    struct trap_frame *trap_frame;
+    uint16_t quantum_ticks;
     void (*entry)(void *arg);
     void *arg;
     const char *name;
@@ -41,5 +45,8 @@ void thread_yield(void);
 void thread_exit(void) __attribute__((noreturn));
 tid_t thread_current_tid(void);
 const thread_t *thread_current(void);
+void thread_on_timer_tick(void);
+struct trap_frame *thread_handle_ecall_from_trap(struct trap_frame *frame);
+struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);
 
 #endif

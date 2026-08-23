@@ -1,25 +1,11 @@
 #include "arch/riscv64/irq.h"
 #include "core/kernel.h"
 #include "core/thread.h"
+#include "core/trap.h"
 
-#include <stddef.h>
-
-typedef struct switch_frame {
-    uint64_t ra;
-    uint64_t s0;
-    uint64_t s1;
-    uint64_t s2;
-    uint64_t s3;
-    uint64_t s4;
-    uint64_t s5;
-    uint64_t s6;
-    uint64_t s7;
-    uint64_t s8;
-    uint64_t s9;
-    uint64_t s10;
-    uint64_t s11;
-    uint64_t padding;
-} switch_frame_t;
+#define THREAD_ECALL_YIELD 1u
+#define THREAD_ECALL_EXIT 2u
+#define TRAP_FRAME_STACK_SIZE 288u
 
 typedef struct tid_queue {
     tid_t tids[THREAD_MAX - 1];
@@ -28,22 +14,20 @@ typedef struct tid_queue {
     uint16_t count;
 } tid_queue_t;
 
-extern void context_switch(uintptr_t *old_sp, uintptr_t new_sp);
+extern void trap_restore(trap_frame_t *frame) __attribute__((noreturn));
 
 static thread_t threads[THREAD_MAX];
 static uint8_t thread_stacks[THREAD_MAX][THREAD_STACK_SIZE] __attribute__((aligned(16)));
 static tid_queue_t ready_queue;
 static thread_t *current_thread;
-static uintptr_t boot_sp;
 static int threads_initialized;
 static int threads_started;
+static volatile int reschedule_requested;
+static uint16_t preempt_disable_depth;
 
-_Static_assert(offsetof(switch_frame_t, ra) == 0, "switch frame ra offset");
-_Static_assert(offsetof(switch_frame_t, s0) == 8, "switch frame s0 offset");
-_Static_assert(offsetof(switch_frame_t, s11) == 96, "switch frame s11 offset");
-_Static_assert(sizeof(switch_frame_t) == 112, "switch frame size");
 _Static_assert(THREAD_MAX > 1, "thread table must include null and real threads");
 _Static_assert(THREAD_MAX - 1 < THREAD_INVALID_TID, "thread ids must fit in tid_t");
+_Static_assert(sizeof(trap_frame_t) <= TRAP_FRAME_STACK_SIZE, "trap frame stack size");
 
 static void null_task(void *arg);
 static void thread_trampoline(void) __attribute__((noreturn));
@@ -147,35 +131,62 @@ static thread_t *pick_next_thread(void)
     return &threads[tid];
 }
 
+static int ready_empty(void)
+{
+    return tid_queue_empty(&ready_queue);
+}
+
+static int current_is_preemptible(void)
+{
+    return threads_started &&
+        current_thread != NULL &&
+        current_thread->tid != THREAD_NULL_TID &&
+        current_thread->state == THREAD_RUNNING &&
+        preempt_disable_depth == 0 &&
+        !ready_empty();
+}
+
+static void preempt_disable(void)
+{
+    preempt_disable_depth++;
+}
+
+static void preempt_enable(void)
+{
+    if (preempt_disable_depth == 0) {
+        PANIC("preempt enable underflow");
+    }
+
+    preempt_disable_depth--;
+}
+
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment)
 {
     return value & ~(alignment - 1u);
 }
 
-static void prepare_initial_stack(thread_t *thread)
+static void prepare_initial_trap_frame(thread_t *thread)
 {
     const uintptr_t stack_top = align_down(
         (uintptr_t)&thread_stacks[thread->tid][THREAD_STACK_SIZE],
         16
     );
-    switch_frame_t *frame = (switch_frame_t *)(stack_top - sizeof(*frame));
+    trap_frame_t *frame = (trap_frame_t *)align_down(
+        stack_top - TRAP_FRAME_STACK_SIZE,
+        16
+    );
 
-    frame->ra = (uint64_t)(uintptr_t)thread_trampoline;
-    frame->s0 = 0;
-    frame->s1 = 0;
-    frame->s2 = 0;
-    frame->s3 = 0;
-    frame->s4 = 0;
-    frame->s5 = 0;
-    frame->s6 = 0;
-    frame->s7 = 0;
-    frame->s8 = 0;
-    frame->s9 = 0;
-    frame->s10 = 0;
-    frame->s11 = 0;
-    frame->padding = 0;
+    uint64_t *frame_words = (uint64_t *)frame;
+    for (uint16_t i = 0; i < sizeof(*frame) / sizeof(frame_words[0]); i++) {
+        frame_words[i] = 0;
+    }
 
-    thread->kernel_sp = (uintptr_t)frame;
+    frame->sp = stack_top;
+    frame->mepc = (uint64_t)(uintptr_t)thread_trampoline;
+    frame->mstatus = MSTATUS_MPP_M | MSTATUS_MPIE;
+
+    thread->kernel_sp = frame->sp;
+    thread->trap_frame = frame;
 }
 
 static void install_thread(
@@ -192,10 +203,11 @@ static void install_thread(
     threads[tid].tid = tid;
     threads[tid].state = THREAD_READY;
     threads[tid].queue = THREAD_QUEUE_NONE;
+    threads[tid].quantum_ticks = 0;
     threads[tid].entry = entry;
     threads[tid].arg = arg;
     threads[tid].name = name;
-    prepare_initial_stack(&threads[tid]);
+    prepare_initial_trap_frame(&threads[tid]);
 }
 
 void thread_init(void)
@@ -209,15 +221,18 @@ void thread_init(void)
         threads[i].state = THREAD_UNUSED;
         threads[i].queue = THREAD_QUEUE_NONE;
         threads[i].kernel_sp = 0;
+        threads[i].trap_frame = NULL;
+        threads[i].quantum_ticks = 0;
         threads[i].entry = NULL;
         threads[i].arg = NULL;
         threads[i].name = NULL;
     }
 
     current_thread = NULL;
-    boot_sp = 0;
     threads_started = 0;
     threads_initialized = 1;
+    reschedule_requested = 0;
+    preempt_disable_depth = 0;
 
     install_thread(THREAD_NULL_TID, "null", null_task, NULL);
 
@@ -257,75 +272,32 @@ void thread_start(void)
     thread_t *next = pick_next_thread();
 
     next->state = THREAD_RUNNING;
+    next->quantum_ticks = 0;
     current_thread = next;
     threads_started = 1;
 
     console_write("thread: starting scheduler\n");
 
     (void)irq_state;
-    context_switch(&boot_sp, next->kernel_sp);
-
-    PANIC("thread_start returned");
+    trap_restore(next->trap_frame);
 }
 
 void thread_yield(void)
 {
-    irq_state_t irq_state = irq_save();
-    thread_t *prev = current_thread;
-
-    if (prev == NULL || !threads_started) {
-        irq_restore(irq_state);
+    if (!threads_started) {
         return;
     }
 
-    if (prev->state != THREAD_RUNNING) {
-        PANIC("current thread is not running");
-    }
-
-    if (prev->tid != THREAD_NULL_TID) {
-        prev->state = THREAD_READY;
-        ready_enqueue(prev->tid);
-    }
-
-    thread_t *next = pick_next_thread();
-
-    if (next == prev) {
-        next->state = THREAD_RUNNING;
-        irq_restore(irq_state);
-        return;
-    }
-
-    if (prev->tid == THREAD_NULL_TID) {
-        prev->state = THREAD_READY;
-    }
-
-    next->state = THREAD_RUNNING;
-    current_thread = next;
-
-    context_switch(&prev->kernel_sp, next->kernel_sp);
-    irq_restore(irq_state);
+    register uint64_t op __asm__("a7") = THREAD_ECALL_YIELD;
+    __asm__ volatile("ecall" : : "r"(op) : "memory");
 }
 
 void thread_exit(void)
 {
-    irq_state_t irq_state = irq_save();
-    thread_t *prev = current_thread;
+    register uint64_t op __asm__("a7") = THREAD_ECALL_EXIT;
+    __asm__ volatile("ecall" : : "r"(op) : "memory");
 
-    if (prev == NULL || prev->tid == THREAD_NULL_TID) {
-        PANIC("invalid thread_exit");
-    }
-
-    prev->state = THREAD_EXITED;
-    prev->queue = THREAD_QUEUE_NONE;
-
-    thread_t *next = pick_next_thread();
-    next->state = THREAD_RUNNING;
-    current_thread = next;
-
-    (void)irq_state;
-    context_switch(&prev->kernel_sp, next->kernel_sp);
-
-    PANIC("exited thread resumed");
+    PANIC("thread_exit returned");
 }
 
 tid_t thread_current_tid(void)
@@ -336,6 +308,160 @@ tid_t thread_current_tid(void)
 const thread_t *thread_current(void)
 {
     return current_thread;
+}
+
+void thread_on_timer_tick(void)
+{
+    if (!threads_started ||
+        current_thread == NULL ||
+        current_thread->tid == THREAD_NULL_TID ||
+        current_thread->state != THREAD_RUNNING) {
+        return;
+    }
+
+    if (current_thread->quantum_ticks < THREAD_QUANTUM_TICKS) {
+        current_thread->quantum_ticks++;
+    }
+
+    if (current_thread->quantum_ticks >= THREAD_QUANTUM_TICKS) {
+        reschedule_requested = 1;
+    }
+}
+
+static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_current)
+{
+    irq_state_t irq_state = irq_save();
+    preempt_disable();
+
+    thread_t *prev = current_thread;
+    if (prev == NULL || prev->state != THREAD_RUNNING) {
+        PANIC("trap switch without running thread");
+    }
+
+    if (requeue_current) {
+        if (prev->tid == THREAD_NULL_TID) {
+            PANIC("attempted to requeue null thread");
+        }
+
+        prev->trap_frame = frame;
+        prev->kernel_sp = frame->sp;
+        prev->state = THREAD_READY;
+        ready_enqueue(prev->tid);
+    } else {
+        if (prev->tid == THREAD_NULL_TID) {
+            PANIC("null thread cannot exit");
+        }
+
+        prev->trap_frame = NULL;
+        prev->kernel_sp = 0;
+        prev->quantum_ticks = 0;
+        prev->state = THREAD_EXITED;
+        prev->queue = THREAD_QUEUE_NONE;
+    }
+
+    thread_t *next = pick_next_thread();
+    if (next->trap_frame == NULL) {
+        PANIC("next thread has no trap frame");
+    }
+
+    next->state = THREAD_RUNNING;
+    next->quantum_ticks = 0;
+    current_thread = next;
+    reschedule_requested = 0;
+
+    trap_frame_t *next_frame = next->trap_frame;
+
+    preempt_enable();
+    irq_restore(irq_state);
+    return next_frame;
+}
+
+static trap_frame_t *switch_null_to_next_from_trap(trap_frame_t *frame)
+{
+    irq_state_t irq_state = irq_save();
+    preempt_disable();
+
+    thread_t *prev = current_thread;
+    if (prev == NULL ||
+        prev->tid != THREAD_NULL_TID ||
+        prev->state != THREAD_RUNNING) {
+        PANIC("null switch without running null thread");
+    }
+
+    prev->trap_frame = frame;
+    prev->kernel_sp = frame->sp;
+    prev->state = THREAD_READY;
+
+    thread_t *next = pick_next_thread();
+    if (next->tid == THREAD_NULL_TID || next->trap_frame == NULL) {
+        PANIC("null switch without ready real thread");
+    }
+
+    next->state = THREAD_RUNNING;
+    next->quantum_ticks = 0;
+    current_thread = next;
+    reschedule_requested = 0;
+
+    trap_frame_t *next_frame = next->trap_frame;
+
+    preempt_enable();
+    irq_restore(irq_state);
+    return next_frame;
+}
+
+trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
+{
+    const uint64_t op = frame->a7;
+
+    frame->mepc += 4;
+
+    if (!threads_started) {
+        return frame;
+    }
+
+    if (op == THREAD_ECALL_YIELD) {
+        if (current_thread == NULL) {
+            return frame;
+        }
+
+        if (ready_empty()) {
+            current_thread->quantum_ticks = 0;
+            return frame;
+        }
+
+        if (current_thread->tid == THREAD_NULL_TID) {
+            return switch_null_to_next_from_trap(frame);
+        }
+
+        return switch_to_next_from_trap(frame, 1);
+    }
+
+    if (op == THREAD_ECALL_EXIT) {
+        return switch_to_next_from_trap(frame, 0);
+    }
+
+    PANIC("unknown thread ecall");
+}
+
+trap_frame_t *thread_maybe_preempt_from_trap(trap_frame_t *frame)
+{
+    if (!reschedule_requested) {
+        return frame;
+    }
+
+    if (!current_is_preemptible()) {
+        if (threads_started &&
+            current_thread != NULL &&
+            current_thread->tid != THREAD_NULL_TID &&
+            ready_empty()) {
+            current_thread->quantum_ticks = 0;
+            reschedule_requested = 0;
+        }
+
+        return frame;
+    }
+
+    return switch_to_next_from_trap(frame, 1);
 }
 
 static void thread_trampoline(void)

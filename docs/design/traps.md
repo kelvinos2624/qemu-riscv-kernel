@@ -32,7 +32,13 @@ assembly layout.
 ## Return Path
 
 After `trap_handle` returns, the assembly entry restores `mepc`, `mstatus`, and
-the saved general-purpose registers, then executes `mret`.
+the saved general-purpose registers from the trap frame selected by C, then
+executes `mret`.
+
+Most traps return the same frame they entered with. Timer preemption and
+machine-mode thread `ecall`s may return a different thread's saved frame. This
+keeps trap-frame selection in C while assembly remains responsible for the
+register restore mechanics.
 
 The self-test handles a deliberate machine-mode `ecall`, advances `mepc` by 4,
 and returns to the instruction after the `ecall`. Unexpected traps print CSR

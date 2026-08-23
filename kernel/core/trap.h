@@ -43,6 +43,6 @@ typedef struct trap_frame {
 
 void trap_init(void);
 void trap_selftest(void);
-void trap_handle(trap_frame_t *frame);
+trap_frame_t *trap_handle(trap_frame_t *frame);
 
 #endif
