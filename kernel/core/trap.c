@@ -1,5 +1,6 @@
 #include "arch/riscv64/csr.h"
 #include "core/kernel.h"
+#include "core/thread.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
 
@@ -49,7 +50,7 @@ void trap_selftest(void)
     console_write("trap: self-test passed\n");
 }
 
-void trap_handle(trap_frame_t *frame)
+trap_frame_t *trap_handle(trap_frame_t *frame)
 {
     const uint64_t is_interrupt = frame->mcause & MCAUSE_INTERRUPT;
     const uint64_t cause = frame->mcause & MCAUSE_CODE_MASK;
@@ -57,12 +58,16 @@ void trap_handle(trap_frame_t *frame)
     if (!is_interrupt && cause == MCAUSE_ECALL_M_MODE && trap_selftest_seen == 0) {
         trap_selftest_seen = 1;
         frame->mepc += 4;
-        return;
+        return frame;
+    }
+
+    if (!is_interrupt && cause == MCAUSE_ECALL_M_MODE) {
+        return thread_handle_ecall_from_trap(frame);
     }
 
     if (is_interrupt && cause == MCAUSE_MACHINE_TIMER_INTERRUPT) {
         timer_handle_interrupt();
-        return;
+        return thread_maybe_preempt_from_trap(frame);
     }
 
     console_write("\ntrap: unhandled ");

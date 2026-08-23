@@ -64,23 +64,26 @@ Timer interrupt setup is complete:
 
 - QEMU `virt` machine timer MMIO
 - `mtimecmp` programming
+- 1 ms kernel tick on the QEMU `virt` 10 MHz timebase
 - `mie.MTIE` and `mstatus.MIE` enablement
 - machine-timer interrupt dispatch through the trap handler
 - monotonic kernel tick counter
 
-Cooperative kernel thread setup is complete:
+Kernel thread scheduling setup is complete:
 
 - `thread_init()` / `thread_start()` lifecycle
 - reserved TID 0 null task
 - static per-thread kernel stacks
 - bounded FIFO ready queue over real thread IDs
-- cooperative FIFO round-robin `thread_yield()`
+- machine-mode `ecall` path for `thread_yield()` and `thread_exit()`
+- timer-driven preemptive FIFO round-robin
+- trap-frame-based thread switching on trap return
 - queue ownership tracking to prevent duplicate ready-queue entries
 - `thread_exit()` for retiring finished threads
-- RISC-V assembly context switch
+- 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Timer-driven preemptive round-robin is the next milestone.
+Sleep queues and blocking synchronization are the next scheduling milestones.
 
 Expected boot output:
 
@@ -96,16 +99,10 @@ timer: observed ... ticks
 milestone 2: timer interrupt setup
 thread: initialized static table, null tid=0
 thread: starting scheduler
-thread: A0
-thread: B0
-thread: C0
-thread: A1
-thread: B1
-thread: C1
-thread: A2
-thread: B2
-thread: C2
-milestone 4: bounded ready queue scheduler core
+thread: hog start
+thread: peer ran without yield
+thread: hog done
+milestone 5: timer preemption
 thread: null idle
 ```
 
@@ -219,9 +216,11 @@ make toolcheck
 
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
-the kernel's UART output. It currently checks the cooperative thread rotation
-order, which exercises the FIFO ready-queue round-robin policy without requiring an
-in-kernel unit-test framework.
+the kernel's UART output. It currently checks the timer preemption path without
+requiring an in-kernel unit-test framework. The current test includes a
+CPU-bound thread that never calls
+`thread_yield()`; a peer thread can run before it finishes only if timer
+preemption works.
 
 Planned test categories:
 

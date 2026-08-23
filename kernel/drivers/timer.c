@@ -1,5 +1,6 @@
 #include "arch/riscv64/csr.h"
 #include "core/kernel.h"
+#include "core/thread.h"
 #include "drivers/timer.h"
 
 static volatile uint64_t ticks;
@@ -52,6 +53,7 @@ void timer_handle_interrupt(void)
     } while (next_compare <= now);
 
     timer_write_mtimecmp(next_compare);
+    thread_on_timer_tick();
 }
 
 uint64_t timer_ticks(void)
