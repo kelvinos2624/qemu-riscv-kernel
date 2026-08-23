@@ -73,6 +73,7 @@ static thread_t *pick_next_thread(void)
 {
     const int start_tid = current_thread == NULL ? 1 : current_thread->tid + 1;
 
+    /* Cooperative baseline: circular TID scan, not FIFO ready-queue order. */
     for (int offset = 0; offset < THREAD_MAX - 1; offset++) {
         int tid = start_tid + offset;
 
@@ -248,6 +249,7 @@ static void null_task(void *arg)
 {
     (void)arg;
     irq_enable();
+    console_write("thread: null idle\n");
 
     for (;;) {
         __asm__ volatile("wfi");

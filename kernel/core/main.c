@@ -28,6 +28,18 @@ static void demo_thread_b(void *arg)
     console_write("thread: B1\n");
     thread_yield();
     console_write("thread: B2\n");
+    thread_exit();
+}
+
+static void demo_thread_c(void *arg)
+{
+    (void)arg;
+
+    console_write("thread: C0\n");
+    thread_yield();
+    console_write("thread: C1\n");
+    thread_yield();
+    console_write("thread: C2\n");
     console_write("milestone 3: cooperative kernel threads\n");
     thread_exit();
 }
@@ -64,6 +76,9 @@ void kmain(void)
     }
     if (thread_create("demo-b", demo_thread_b, NULL) < 0) {
         PANIC("failed to create demo-b");
+    }
+    if (thread_create("demo-c", demo_thread_c, NULL) < 0) {
+        PANIC("failed to create demo-c");
     }
     thread_start();
 }

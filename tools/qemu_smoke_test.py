@@ -6,8 +6,30 @@ import sys
 import time
 
 
-EXPECTED = "milestone 3: cooperative kernel threads"
+EXPECTED_SEQUENCE = [
+    "thread: A0",
+    "thread: B0",
+    "thread: C0",
+    "thread: A1",
+    "thread: B1",
+    "thread: C1",
+    "thread: A2",
+    "thread: B2",
+    "thread: C2",
+    "milestone 3: cooperative kernel threads",
+    "thread: null idle",
+]
 TIMEOUT_SECONDS = 5.0
+
+
+def is_relevant_line(line: str) -> bool:
+    return (
+        line.startswith("thread: A")
+        or line.startswith("thread: B")
+        or line.startswith("thread: C")
+        or line.startswith("milestone 3:")
+        or line.startswith("thread: null idle")
+    )
 
 
 def main() -> int:
@@ -42,6 +64,8 @@ def main() -> int:
     )
 
     output = []
+    observed_sequence = []
+    expected_index = 0
     deadline = time.monotonic() + TIMEOUT_SECONDS
 
     try:
@@ -52,8 +76,24 @@ def main() -> int:
                     line = proc.stdout.readline()
                     if line:
                         output.append(line)
-                        if EXPECTED in line:
-                            print("qemu smoke test: observed cooperative thread milestone banner")
+                        stripped_line = line.strip()
+                        if is_relevant_line(stripped_line):
+                            observed_sequence.append(stripped_line)
+                            if stripped_line != EXPECTED_SEQUENCE[expected_index]:
+                                print(
+                                    "qemu smoke test: scheduler sequence mismatch",
+                                    file=sys.stderr,
+                                )
+                                print(
+                                    f"expected: {EXPECTED_SEQUENCE[expected_index]}",
+                                    file=sys.stderr,
+                                )
+                                print(f"observed: {stripped_line}", file=sys.stderr)
+                                print("".join(output), file=sys.stderr)
+                                return 1
+                            expected_index += 1
+                        if expected_index == len(EXPECTED_SEQUENCE):
+                            print("qemu smoke test: observed circular TID round-robin sequence")
                             return 0
 
             if proc.poll() is not None:
@@ -67,7 +107,12 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe cooperative thread milestone banner", file=sys.stderr)
+    print("qemu smoke test: did not observe circular TID round-robin sequence", file=sys.stderr)
+    print(
+        f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
+        file=sys.stderr,
+    )
+    print(f"observed sequence: {observed_sequence}", file=sys.stderr)
     print("".join(output), file=sys.stderr)
     return 1
 
