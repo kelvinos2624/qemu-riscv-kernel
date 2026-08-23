@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; scheduler policy superseded by DDR 9
 
 ## Context
 

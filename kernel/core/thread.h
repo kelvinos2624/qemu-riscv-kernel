@@ -3,9 +3,12 @@
 
 #include <stdint.h>
 
-#define THREAD_NULL_TID 0
+#define THREAD_NULL_TID ((tid_t)0)
+#define THREAD_INVALID_TID UINT16_MAX
 #define THREAD_MAX 8
 #define THREAD_STACK_SIZE 4096
+
+typedef uint16_t tid_t;
 
 typedef enum {
     THREAD_UNUSED = 0,
@@ -14,9 +17,17 @@ typedef enum {
     THREAD_EXITED
 } thread_state_t;
 
+typedef enum {
+    THREAD_QUEUE_NONE = 0,
+    THREAD_QUEUE_READY,
+    THREAD_QUEUE_SLEEP,
+    THREAD_QUEUE_WAIT
+} thread_queue_t;
+
 typedef struct thread {
-    int tid;
+    tid_t tid;
     thread_state_t state;
+    thread_queue_t queue;
     uintptr_t kernel_sp;
     void (*entry)(void *arg);
     void *arg;
@@ -28,7 +39,7 @@ int thread_create(const char *name, void (*entry)(void *arg), void *arg);
 void thread_start(void) __attribute__((noreturn));
 void thread_yield(void);
 void thread_exit(void) __attribute__((noreturn));
-int thread_current_tid(void);
+tid_t thread_current_tid(void);
 const thread_t *thread_current(void);
 
 #endif
