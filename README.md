@@ -10,6 +10,17 @@ This is not intended to become a POSIX-compatible OS or a Linux clone. The
 project is scoped as a systems engineering portfolio piece: small enough to
 explain deeply, but real enough to exercise the hardware/software boundary.
 
+## Project Status
+
+Progress: `[########------------] 40%`
+
+The kernel currently boots on QEMU `virt`, initializes UART output, installs a
+machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
+round-robin kernel threads using trap-frame-based switching. The project is now
+moving from core execution management into scheduling primitives such as sleep
+queues, wait queues, and mutexes. Memory management, userspace isolation,
+syscalls, and the simulated accelerator driver remain future milestones.
+
 ## Project Goals
 
 The project is designed to show practical understanding of:
