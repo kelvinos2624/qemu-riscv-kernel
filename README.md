@@ -12,7 +12,12 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[########------------] 40%`
+<div>
+  <strong>Overall progress:</strong> 40%
+  <div style="width: 100%; max-width: 520px; height: 14px; border: 1px solid #8b949e; border-radius: 999px; overflow: hidden; background: #21262d; margin-top: 6px;">
+    <div style="width: 40%; height: 100%; background: #2ea043;"></div>
+  </div>
+</div>
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
