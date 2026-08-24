@@ -16,10 +16,11 @@ Progress: `[########------------] 40%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
-round-robin kernel threads using trap-frame-based switching. The project is now
-moving from core execution management into scheduling primitives such as sleep
-queues, wait queues, and mutexes. Memory management, userspace isolation,
-syscalls, and the simulated accelerator driver remain future milestones.
+round-robin kernel threads using trap-frame-based switching. It also supports
+tick-based `thread_sleep()` through an absolute-deadline sleep queue. The
+project is now moving from basic time blocking into wait queues, mutexes, and
+blocking wakeups. Memory management, userspace isolation, syscalls, and the
+simulated accelerator driver remain future milestones.
 
 ## Project Goals
 
@@ -90,11 +91,12 @@ Kernel thread scheduling setup is complete:
 - timer-driven preemptive FIFO round-robin
 - trap-frame-based thread switching on trap return
 - queue ownership tracking to prevent duplicate ready-queue entries
+- `thread_sleep(ticks)` with a sorted absolute-deadline sleep queue
 - `thread_exit()` for retiring finished threads
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Sleep queues and blocking synchronization are the next scheduling milestones.
+Wait queues and blocking synchronization are the next scheduling milestones.
 
 Expected boot output:
 
@@ -110,11 +112,13 @@ timer: observed ... ticks
 milestone 2: timer interrupt setup
 thread: initialized static table, null tid=0
 thread: starting scheduler
-thread: hog start
-thread: peer ran without yield
-thread: hog done
-milestone 5: timer preemption
+thread: sleep-short start
+thread: sleep-long start
+thread: peer ran while sleepers blocked
 thread: null idle
+thread: sleep-short woke
+thread: sleep-long woke
+milestone 6: sleep queue
 ```
 
 ## Planned Architecture
@@ -227,11 +231,10 @@ make toolcheck
 
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
-the kernel's UART output. It currently checks the timer preemption path without
-requiring an in-kernel unit-test framework. The current test includes a
-CPU-bound thread that never calls
-`thread_yield()`; a peer thread can run before it finishes only if timer
-preemption works.
+the kernel's UART output. It currently checks sleep queue ordering without
+requiring an in-kernel unit-test framework. The current test verifies that
+sleeping threads leave the ready queue, a peer runs while they are blocked, and
+the shorter absolute wake deadline wakes first.
 
 Planned test categories:
 

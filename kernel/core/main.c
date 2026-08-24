@@ -11,13 +11,9 @@ static void demo_thread_a(void *arg)
 {
     (void)arg;
 
-    console_write("thread: hog start\n");
-    const uint64_t start_ticks = timer_ticks();
-    while (timer_ticks() - start_ticks < THREAD_QUANTUM_TICKS + 2u) {
-        __asm__ volatile("" ::: "memory");
-    }
-    console_write("thread: hog done\n");
-    console_write("milestone 5: timer preemption\n");
+    console_write("thread: sleep-short start\n");
+    thread_sleep(5);
+    console_write("thread: sleep-short woke\n");
     thread_exit();
 }
 
@@ -25,7 +21,18 @@ static void demo_thread_b(void *arg)
 {
     (void)arg;
 
-    console_write("thread: peer ran without yield\n");
+    console_write("thread: sleep-long start\n");
+    thread_sleep(9);
+    console_write("thread: sleep-long woke\n");
+    console_write("milestone 6: sleep queue\n");
+    thread_exit();
+}
+
+static void demo_thread_c(void *arg)
+{
+    (void)arg;
+
+    console_write("thread: peer ran while sleepers blocked\n");
     thread_exit();
 }
 
@@ -61,6 +68,9 @@ void kmain(void)
     }
     if (thread_create("demo-b", demo_thread_b, NULL) < 0) {
         PANIC("failed to create demo-b");
+    }
+    if (thread_create("demo-c", demo_thread_c, NULL) < 0) {
+        PANIC("failed to create demo-c");
     }
     thread_start();
 }

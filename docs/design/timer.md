@@ -5,7 +5,7 @@
 This milestone configures the RISC-V machine timer on QEMU `virt`, enables
 machine-timer interrupts, handles them through the existing trap path, and
 maintains a monotonic kernel tick counter. The timer also drives scheduler
-quantum accounting.
+quantum accounting and sleep queue wakeups through the scheduler tick hook.
 
 ## Hardware Path
 
@@ -37,7 +37,8 @@ Timer setup enables:
 The timer interrupt handler is intentionally short. It increments a monotonic
 tick counter, schedules the next compare value, and calls the scheduler tick
 hook. It does not print to UART, pick a thread, manipulate the ready queue, or
-perform the context switch itself.
+perform the context switch itself. It also does not directly manipulate the
+sleep queue; expired sleepers are handled by scheduler code.
 
 This mirrors the ECE350 SysTick lesson: one hardware timer provides periodic
 kernel control, while software tracks per-task timeslices, wakeups, and
@@ -49,6 +50,5 @@ time slice.
 
 ## Next Work
 
-- Add a sleep queue based on timer ticks.
 - Decide whether scheduler time accounting uses fixed ticks or absolute
   timestamps.

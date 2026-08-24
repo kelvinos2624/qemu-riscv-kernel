@@ -16,6 +16,7 @@ typedef enum {
     THREAD_UNUSED = 0,
     THREAD_READY,
     THREAD_RUNNING,
+    THREAD_SLEEPING,
     THREAD_EXITED
 } thread_state_t;
 
@@ -33,6 +34,7 @@ typedef struct thread {
     uintptr_t kernel_sp;
     struct trap_frame *trap_frame;
     uint16_t quantum_ticks;
+    uint64_t wake_tick;
     void (*entry)(void *arg);
     void *arg;
     const char *name;
@@ -42,6 +44,7 @@ void thread_init(void);
 int thread_create(const char *name, void (*entry)(void *arg), void *arg);
 void thread_start(void) __attribute__((noreturn));
 void thread_yield(void);
+void thread_sleep(uint64_t ticks);
 void thread_exit(void) __attribute__((noreturn));
 tid_t thread_current_tid(void);
 const thread_t *thread_current(void);
