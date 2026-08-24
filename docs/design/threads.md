@@ -5,7 +5,8 @@
 This milestone adds machine-mode kernel threads with FIFO round-robin
 scheduling. The kernel can initialize a thread subsystem, create threads, start
 scheduling, voluntarily yield between threads, preempt CPU-bound threads from
-the timer interrupt path, and retire exited threads.
+the timer interrupt path, put threads to sleep until a future tick, and retire
+exited threads.
 
 All threads in this milestone run in RISC-V machine mode. They are kernel
 threads, not user tasks: there is no address-space separation, user stack,
@@ -18,6 +19,7 @@ void thread_init(void);
 int thread_create(const char *name, void (*entry)(void *), void *arg);
 void thread_start(void);
 void thread_yield(void);
+void thread_sleep(uint64_t ticks);
 void thread_exit(void);
 tid_t thread_current_tid(void);
 ```
@@ -51,12 +53,13 @@ test can prove that exited real threads fall back to the idle path.
 
 ## Thread Storage
 
-Threads use a static table, static kernel stacks, and a bounded FIFO ready
-queue:
+Threads use a static table, static kernel stacks, a bounded FIFO ready queue,
+and a bounded sleep queue:
 
 - `THREAD_MAX`: 8, including the null task
 - `THREAD_STACK_SIZE`: 4096 bytes
 - ready queue capacity: `THREAD_MAX - 1`
+- sleep queue capacity: `THREAD_MAX - 1`
 
 Static stacks keep this milestone deterministic and independent of the memory
 allocator milestone. Dynamic stack allocation should be introduced after the
@@ -72,10 +75,9 @@ Each TCB also tracks its current queue owner:
 - `THREAD_QUEUE_SLEEP`
 - `THREAD_QUEUE_WAIT`
 
-Only `THREAD_QUEUE_READY` is active in this milestone. The sleep and wait
-members are reserved so future sleep queues and wait queues can use the same
-"one queue owner per thread" invariant instead of adding ad hoc duplicate
-checks later.
+`THREAD_QUEUE_READY` and `THREAD_QUEUE_SLEEP` are active in this milestone. The
+wait member is reserved so future wait queues can use the same "one queue owner
+per thread" invariant instead of adding ad hoc duplicate checks later.
 
 ## Context Switching
 
@@ -126,6 +128,11 @@ Queue semantics:
   the ready queue tail, then pops the next TID from the ready queue head.
 - timer ticks increment the current thread's quantum counter. Once it reaches
   `THREAD_QUANTUM_TICKS`, the scheduler requests preemption.
+- `thread_sleep(ticks)` enters the trap path with a machine-mode `ecall`. For a
+  positive tick count, the current real thread becomes `THREAD_SLEEPING`, stores
+  an absolute `wake_tick`, enters the sleep queue, and the scheduler selects the
+  next ready thread.
+- `thread_sleep(0)` behaves like `thread_yield()` for real threads.
 - `thread_exit()` marks the current real thread `THREAD_EXITED` and does not
   requeue it.
 - if the ready queue is empty, `pick_next_thread()` returns the null task.
@@ -137,14 +144,44 @@ runnable thread is selected from the head.
 `THREAD_QUANTUM_TICKS` is 10. With the current 1 ms QEMU timer tick, the
 scheduler quantum is approximately 10 ms.
 
+## Sleep Queue
+
+The sleep queue uses absolute wake ticks:
+
+```c
+wake_tick = timer_ticks() + ticks;
+```
+
+Sleeping threads are kept in a sorted fixed array of TIDs. The head has the
+earliest `wake_tick`, and same-deadline sleepers keep insertion order. On each
+timer tick, `thread_on_timer_tick()` wakes expired sleepers from the head:
+
+1. `THREAD_SLEEPING -> THREAD_READY`
+2. `THREAD_QUEUE_SLEEP -> THREAD_QUEUE_NONE`
+3. append to the ready queue tail
+
+The timer driver does not manipulate the sleep queue directly. It updates
+hardware timer state and calls the scheduler tick hook.
+
+Absolute wake ticks were chosen over a delta queue because they are easier to
+trace, test, and compose with future timeout work. A delta queue is common in
+small tick-driven MCU RTOS kernels, but absolute deadlines make telemetry more
+direct: traces can log `now`, `wake_tick`, requested duration, and wakeup
+lateness without reconstructing cumulative deltas.
+
+The sorted array is intentionally bounded and simple for `THREAD_MAX = 8`. If
+the kernel grows substantially more sleepers, the likely upgrade path is a
+min-heap keyed by `wake_tick` or a timer wheel, not a larger sorted array.
+
 Thread states for this milestone:
 
 - `THREAD_UNUSED`
 - `THREAD_READY`
 - `THREAD_RUNNING`
+- `THREAD_SLEEPING`
 - `THREAD_EXITED`
 
-Blocking and sleeping states come later.
+Blocking states come later.
 
 ## Interrupt Safety
 
@@ -162,6 +199,7 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add blocked and sleeping states.
-- Add a sleep queue driven by timer ticks.
+- Add blocked states.
+- Add wait queues and blocking wakeups.
+- Add mutexes.
 - Add scheduler tracing for context switch events.
