@@ -12,10 +12,19 @@
 typedef uint16_t tid_t;
 struct trap_frame;
 
+typedef struct wait_queue {
+    tid_t tids[THREAD_MAX - 1];
+    uint16_t head;
+    uint16_t tail;
+    uint16_t count;
+    const char *name;
+} wait_queue_t;
+
 typedef enum {
     THREAD_UNUSED = 0,
     THREAD_READY,
     THREAD_RUNNING,
+    THREAD_BLOCKED,
     THREAD_SLEEPING,
     THREAD_EXITED
 } thread_state_t;
@@ -31,6 +40,7 @@ typedef struct thread {
     tid_t tid;
     thread_state_t state;
     thread_queue_t queue;
+    wait_queue_t *wait_queue;
     uintptr_t kernel_sp;
     struct trap_frame *trap_frame;
     uint16_t quantum_ticks;
@@ -48,6 +58,10 @@ void thread_sleep(uint64_t ticks);
 void thread_exit(void) __attribute__((noreturn));
 tid_t thread_current_tid(void);
 const thread_t *thread_current(void);
+void wait_queue_init(wait_queue_t *queue, const char *name);
+void wait_queue_sleep(wait_queue_t *queue);
+void wait_queue_wake_one(wait_queue_t *queue);
+void wait_queue_wake_all(wait_queue_t *queue);
 void thread_on_timer_tick(void);
 struct trap_frame *thread_handle_ecall_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);
