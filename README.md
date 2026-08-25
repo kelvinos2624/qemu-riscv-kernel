@@ -12,16 +12,15 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[########------------] 40%`
+Progress: `[#########-----------] 45%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
 round-robin kernel threads using trap-frame-based switching. It also supports
 tick-based `thread_sleep()` through an absolute-deadline sleep queue and
-event-style blocking through wait queues. The project is now moving from
-blocking wakeups into mutexes and synchronization policy. Memory management,
-userspace isolation, syscalls, and the simulated accelerator driver remain
-future milestones.
+event-style blocking through wait queues. It now includes non-recursive kernel
+mutexes with FIFO owner transfer. Memory management, userspace isolation,
+syscalls, and the simulated accelerator driver remain future milestones.
 
 ## Project Goals
 
@@ -94,11 +93,12 @@ Kernel thread scheduling setup is complete:
 - queue ownership tracking to prevent duplicate ready-queue entries
 - `thread_sleep(ticks)` with a sorted absolute-deadline sleep queue
 - FIFO wait queues for event-style blocking and wakeups
+- non-recursive kernel mutexes built on wait queues
 - `thread_exit()` for retiring finished threads
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Mutexes and blocking synchronization policy are the next scheduling milestones.
+Timed waits and scheduler tracing are the next scheduling milestones.
 
 Expected boot output:
 
@@ -114,12 +114,12 @@ timer: observed ... ticks
 milestone 2: timer interrupt setup
 thread: initialized static table, null tid=0
 thread: starting scheduler
-thread: waiter-a blocking
-thread: waiter-b blocking
-thread: signaler setting event
-milestone 7: wait queues
-thread: waiter-a resumed
-thread: waiter-b resumed
+thread: mutex-a locking
+thread: mutex-a acquired
+thread: mutex-b waiting
+thread: mutex-a unlocking
+thread: mutex-b acquired
+milestone 8: mutexes
 thread: null idle
 ```
 
@@ -234,9 +234,9 @@ make toolcheck
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
 the kernel's UART output. It currently checks wait queue blocking and FIFO
-wakeup ordering without requiring an in-kernel unit-test framework. The current
-test verifies that two waiters block on one event queue and resume in the order
-they were woken.
+wakeup ordering through the mutex demo without requiring an in-kernel unit-test
+framework. The current test verifies that a contended mutex blocks one thread
+and transfers ownership to the oldest waiter.
 
 Planned test categories:
 

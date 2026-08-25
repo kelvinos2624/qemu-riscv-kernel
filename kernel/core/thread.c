@@ -342,7 +342,7 @@ static void wake_sleepers(uint64_t now)
     }
 }
 
-void wait_queue_wake_one(wait_queue_t *queue)
+tid_t wait_queue_wake_one(wait_queue_t *queue)
 {
     if (queue == NULL) {
         PANIC("wait_queue_wake_one null queue");
@@ -358,6 +358,7 @@ void wait_queue_wake_one(wait_queue_t *queue)
 
     preempt_enable();
     irq_restore(irq_state);
+    return tid;
 }
 
 void wait_queue_wake_all(wait_queue_t *queue)

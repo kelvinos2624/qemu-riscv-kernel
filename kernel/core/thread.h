@@ -60,7 +60,7 @@ tid_t thread_current_tid(void);
 const thread_t *thread_current(void);
 void wait_queue_init(wait_queue_t *queue, const char *name);
 void wait_queue_sleep(wait_queue_t *queue);
-void wait_queue_wake_one(wait_queue_t *queue);
+tid_t wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 void thread_on_timer_tick(void);
 struct trap_frame *thread_handle_ecall_from_trap(struct trap_frame *frame);

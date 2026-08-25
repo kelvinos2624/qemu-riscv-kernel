@@ -27,7 +27,7 @@ void thread_exit(void);
 tid_t thread_current_tid(void);
 void wait_queue_init(wait_queue_t *queue, const char *name);
 void wait_queue_sleep(wait_queue_t *queue);
-void wait_queue_wake_one(wait_queue_t *queue);
+tid_t wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 ```
 
@@ -201,8 +201,8 @@ Current wait queue semantics:
 - `wait_queue_sleep(queue)` enters the trap path with a machine-mode `ecall`.
 - the current real thread becomes `THREAD_BLOCKED`.
 - the thread enters `queue` in FIFO order with `THREAD_QUEUE_WAIT` ownership.
-- `wait_queue_wake_one(queue)` removes the oldest waiter and appends it to the
-  ready queue tail.
+- `wait_queue_wake_one(queue)` removes the oldest waiter, appends it to the
+  ready queue tail, and returns the selected TID.
 - `wait_queue_wake_all(queue)` repeats that until the queue is empty.
 
 Wakeup means "the condition may now be true", not "the condition is guaranteed
@@ -233,7 +233,8 @@ Thread states for this milestone:
 - `THREAD_SLEEPING`
 - `THREAD_EXITED`
 
-Mutex ownership and timed waits come later.
+Mutex ownership is implemented in `kernel/core/sync.c`, while timed waits come
+later.
 
 ## Interrupt Safety
 
@@ -251,6 +252,5 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add mutexes.
 - Add timed waits.
 - Add scheduler tracing for context switch events.

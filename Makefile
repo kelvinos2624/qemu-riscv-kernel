@@ -29,6 +29,7 @@ KERNEL_SRCS := \
 	kernel/arch/riscv64/trap.S \
 	kernel/core/main.c \
 	kernel/core/panic.c \
+	kernel/core/sync.c \
 	kernel/core/thread.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \
