@@ -28,9 +28,9 @@ does that. For example:
 - a pipe owns "data became readable"
 
 Waiters are stored in FIFO order. `wait_queue_wake_one()` wakes the oldest
-waiter, and `wait_queue_wake_all()` wakes every waiter in FIFO order. Woken
-threads are appended to the ready queue tail; the ready queue remains
-responsible for dispatch order.
+waiter and returns its TID, and `wait_queue_wake_all()` wakes every waiter in
+FIFO order. Woken threads are appended to the ready queue tail; the ready queue
+remains responsible for dispatch order.
 
 ## Alternatives Considered
 
