@@ -6,7 +6,8 @@ This milestone adds machine-mode kernel threads with FIFO round-robin
 scheduling. The kernel can initialize a thread subsystem, create threads, start
 scheduling, voluntarily yield between threads, preempt CPU-bound threads from
 the timer interrupt path, put threads to sleep until a future tick, and retire
-exited threads.
+exited threads. It also supports FIFO wait queues for blocking on kernel-owned
+events.
 
 All threads in this milestone run in RISC-V machine mode. They are kernel
 threads, not user tasks: there is no address-space separation, user stack,
@@ -15,6 +16,8 @@ threads, not user tasks: there is no address-space separation, user stack,
 ## Public API
 
 ```c
+typedef struct wait_queue wait_queue_t;
+
 void thread_init(void);
 int thread_create(const char *name, void (*entry)(void *), void *arg);
 void thread_start(void);
@@ -22,6 +25,10 @@ void thread_yield(void);
 void thread_sleep(uint64_t ticks);
 void thread_exit(void);
 tid_t thread_current_tid(void);
+void wait_queue_init(wait_queue_t *queue, const char *name);
+void wait_queue_sleep(wait_queue_t *queue);
+void wait_queue_wake_one(wait_queue_t *queue);
+void wait_queue_wake_all(wait_queue_t *queue);
 ```
 
 The shape intentionally resembles the ECE350 RTX split between kernel
@@ -53,13 +60,14 @@ test can prove that exited real threads fall back to the idle path.
 
 ## Thread Storage
 
-Threads use a static table, static kernel stacks, a bounded FIFO ready queue,
-and a bounded sleep queue:
+Threads use a static table, static kernel stacks, a bounded FIFO ready queue, a
+bounded sleep queue, and embeddable wait queues:
 
 - `THREAD_MAX`: 8, including the null task
 - `THREAD_STACK_SIZE`: 4096 bytes
 - ready queue capacity: `THREAD_MAX - 1`
 - sleep queue capacity: `THREAD_MAX - 1`
+- wait queue capacity: `THREAD_MAX - 1`
 
 Static stacks keep this milestone deterministic and independent of the memory
 allocator milestone. Dynamic stack allocation should be introduced after the
@@ -75,9 +83,9 @@ Each TCB also tracks its current queue owner:
 - `THREAD_QUEUE_SLEEP`
 - `THREAD_QUEUE_WAIT`
 
-`THREAD_QUEUE_READY` and `THREAD_QUEUE_SLEEP` are active in this milestone. The
-wait member is reserved so future wait queues can use the same "one queue owner
-per thread" invariant instead of adding ad hoc duplicate checks later.
+`THREAD_QUEUE_READY`, `THREAD_QUEUE_SLEEP`, and `THREAD_QUEUE_WAIT` are active.
+The same "one queue owner per thread" invariant prevents a thread from being
+ready, sleeping, and event-blocked at the same time.
 
 ## Context Switching
 
@@ -173,15 +181,59 @@ The sorted array is intentionally bounded and simple for `THREAD_MAX = 8`. If
 the kernel grows substantially more sleepers, the likely upgrade path is a
 min-heap keyed by `wake_tick` or a timer wheel, not a larger sorted array.
 
+## Wait Queues
+
+A wait queue is an embeddable kernel object that stores threads blocked on one
+specific condition owned by another subsystem. The wait queue is not the event
+itself; it is the place where threads sleep while waiting for that event.
+
+Examples of future owners:
+
+- `mutex.waiters`: mutex became available
+- `request.done_waiters`: driver request completed
+- `pipe.readable`: pipe contains data
+
+Each wait queue should represent one logical condition. A single global queue
+for unrelated events would make FIFO wake order meaningless.
+
+Current wait queue semantics:
+
+- `wait_queue_sleep(queue)` enters the trap path with a machine-mode `ecall`.
+- the current real thread becomes `THREAD_BLOCKED`.
+- the thread enters `queue` in FIFO order with `THREAD_QUEUE_WAIT` ownership.
+- `wait_queue_wake_one(queue)` removes the oldest waiter and appends it to the
+  ready queue tail.
+- `wait_queue_wake_all(queue)` repeats that until the queue is empty.
+
+Wakeup means "the condition may now be true", not "the condition is guaranteed
+for this thread." Callers should use the standard pattern:
+
+```c
+while (!condition) {
+    wait_queue_sleep(&queue);
+}
+```
+
+The condition check and the transition to blocked must eventually be protected
+by the synchronization primitive that owns the condition. This milestone does
+not yet provide spinlocks or mutexes, so the demo uses deterministic thread
+ordering to avoid lost wakeups. The next mutex/spinlock work should make the
+check-and-sleep boundary explicit.
+
+This maps to the ECE350/STM32 RTOS model where a task leaves the ready list
+while waiting for a kernel event, then re-enters READY when another kernel path
+signals that event.
+
 Thread states for this milestone:
 
 - `THREAD_UNUSED`
 - `THREAD_READY`
 - `THREAD_RUNNING`
+- `THREAD_BLOCKED`
 - `THREAD_SLEEPING`
 - `THREAD_EXITED`
 
-Blocking states come later.
+Mutex ownership and timed waits come later.
 
 ## Interrupt Safety
 
@@ -199,7 +251,6 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add blocked states.
-- Add wait queues and blocking wakeups.
 - Add mutexes.
+- Add timed waits.
 - Add scheduler tracing for context switch events.

@@ -7,22 +7,22 @@ import time
 
 
 EXPECTED_SEQUENCE = [
-    "thread: sleep-short start",
-    "thread: sleep-long start",
-    "thread: peer ran while sleepers blocked",
+    "thread: waiter-a blocking",
+    "thread: waiter-b blocking",
+    "thread: signaler setting event",
+    "milestone 7: wait queues",
+    "thread: waiter-a resumed",
+    "thread: waiter-b resumed",
     "thread: null idle",
-    "thread: sleep-short woke",
-    "thread: sleep-long woke",
-    "milestone 6: sleep queue",
 ]
 TIMEOUT_SECONDS = 5.0
 
 
 def is_relevant_line(line: str) -> bool:
     return (
-        line.startswith("thread: sleep")
-        or line.startswith("thread: peer")
-        or line.startswith("milestone 6:")
+        line.startswith("thread: waiter")
+        or line.startswith("thread: signaler")
+        or line.startswith("milestone 7:")
         or line.startswith("thread: null idle")
     )
 
@@ -88,7 +88,7 @@ def main() -> int:
                                 return 1
                             expected_index += 1
                         if expected_index == len(EXPECTED_SEQUENCE):
-                            print("qemu smoke test: observed sleep queue sequence")
+                            print("qemu smoke test: observed wait queue sequence")
                             return 0
 
             if proc.poll() is not None:
@@ -102,7 +102,7 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe sleep queue sequence", file=sys.stderr)
+    print("qemu smoke test: did not observe wait queue sequence", file=sys.stderr)
     print(
         f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
         file=sys.stderr,
