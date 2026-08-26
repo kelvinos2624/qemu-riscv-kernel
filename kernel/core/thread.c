@@ -8,6 +8,7 @@
 #define THREAD_ECALL_EXIT 2u
 #define THREAD_ECALL_SLEEP 3u
 #define THREAD_ECALL_WAIT 4u
+#define THREAD_ECALL_WAIT_TIMEOUT 5u
 #define TRAP_FRAME_STACK_SIZE 288u
 
 typedef struct tid_queue {
@@ -141,6 +142,39 @@ static tid_t wait_queue_pop(wait_queue_t *queue)
     return tid;
 }
 
+static int wait_queue_remove(wait_queue_t *queue, tid_t tid)
+{
+    uint16_t found = UINT16_MAX;
+
+    for (uint16_t i = 0; i < queue->count; i++) {
+        uint16_t index = (uint16_t)((queue->head + i) % (THREAD_MAX - 1));
+        if (queue->tids[index] == tid) {
+            found = i;
+            break;
+        }
+    }
+
+    if (found == UINT16_MAX) {
+        return -1;
+    }
+
+    uint16_t write = 0;
+    for (uint16_t i = 0; i < queue->count; i++) {
+        uint16_t index = (uint16_t)((queue->head + i) % (THREAD_MAX - 1));
+        tid_t queued_tid = queue->tids[index];
+        if (i == found) {
+            continue;
+        }
+        queue->tids[write] = queued_tid;
+        write++;
+    }
+
+    queue->head = 0;
+    queue->count--;
+    queue->tail = queue->count;
+    return 0;
+}
+
 static void sleep_queue_init(sleep_queue_t *queue)
 {
     queue->count = 0;
@@ -200,6 +234,23 @@ static tid_t sleep_queue_pop_head(sleep_queue_t *queue)
     return tid;
 }
 
+static int sleep_queue_remove(sleep_queue_t *queue, tid_t tid)
+{
+    for (uint16_t i = 0; i < queue->count; i++) {
+        if (queue->tids[i] != tid) {
+            continue;
+        }
+
+        for (uint16_t j = (uint16_t)(i + 1u); j < queue->count; j++) {
+            queue->tids[j - 1u] = queue->tids[j];
+        }
+        queue->count--;
+        return 0;
+    }
+
+    return -1;
+}
+
 static void ready_enqueue(tid_t tid)
 {
     if (!tid_is_real(tid)) {
@@ -207,7 +258,10 @@ static void ready_enqueue(tid_t tid)
     }
 
     thread_t *thread = &threads[tid];
-    if (thread->state != THREAD_READY || thread->queue != THREAD_QUEUE_NONE) {
+    if (thread->state != THREAD_READY ||
+        thread->in_ready_queue ||
+        thread->in_sleep_queue ||
+        thread->in_wait_queue) {
         PANIC("ready queue invariant violation");
     }
 
@@ -215,7 +269,7 @@ static void ready_enqueue(tid_t tid)
         PANIC("ready queue full");
     }
 
-    thread->queue = THREAD_QUEUE_READY;
+    thread->in_ready_queue = 1;
 }
 
 static tid_t ready_dequeue(void)
@@ -230,11 +284,11 @@ static tid_t ready_dequeue(void)
     }
 
     thread_t *thread = &threads[tid];
-    if (thread->state != THREAD_READY || thread->queue != THREAD_QUEUE_READY) {
+    if (thread->state != THREAD_READY || !thread->in_ready_queue) {
         PANIC("ready queue contained non-ready thread");
     }
 
-    thread->queue = THREAD_QUEUE_NONE;
+    thread->in_ready_queue = 0;
     return tid;
 }
 
@@ -245,13 +299,17 @@ static void sleep_enqueue(tid_t tid, uint64_t wake_tick)
     }
 
     thread_t *thread = &threads[tid];
-    if (thread->state != THREAD_SLEEPING || thread->queue != THREAD_QUEUE_NONE) {
+    if (thread->state != THREAD_BLOCKED ||
+        thread->in_ready_queue ||
+        thread->in_sleep_queue ||
+        (thread->wait_reason != THREAD_WAIT_SLEEP &&
+            thread->wait_reason != THREAD_WAIT_QUEUE_TIMEOUT)) {
         PANIC("sleep queue invariant violation");
     }
 
     thread->wake_tick = wake_tick;
     sleep_queue_insert(&sleep_queue, tid);
-    thread->queue = THREAD_QUEUE_SLEEP;
+    thread->in_sleep_queue = 1;
 }
 
 static void wait_enqueue(wait_queue_t *queue, tid_t tid)
@@ -266,13 +324,16 @@ static void wait_enqueue(wait_queue_t *queue, tid_t tid)
 
     thread_t *thread = &threads[tid];
     if (thread->state != THREAD_BLOCKED ||
-        thread->queue != THREAD_QUEUE_NONE ||
+        thread->in_ready_queue ||
+        thread->in_wait_queue ||
+        (thread->wait_reason != THREAD_WAIT_QUEUE &&
+            thread->wait_reason != THREAD_WAIT_QUEUE_TIMEOUT) ||
         thread->wait_queue != NULL) {
         PANIC("wait queue invariant violation");
     }
 
     wait_queue_push(queue, tid);
-    thread->queue = THREAD_QUEUE_WAIT;
+    thread->in_wait_queue = 1;
     thread->wait_queue = queue;
 }
 
@@ -289,19 +350,68 @@ static tid_t wait_dequeue(wait_queue_t *queue)
 
     thread_t *thread = &threads[tid];
     if (thread->state != THREAD_BLOCKED ||
-        thread->queue != THREAD_QUEUE_WAIT ||
+        !thread->in_wait_queue ||
         thread->wait_queue != queue) {
         PANIC("wait queue contained non-blocked thread");
     }
 
-    thread->queue = THREAD_QUEUE_NONE;
+    thread->in_wait_queue = 0;
     thread->wait_queue = NULL;
     return tid;
 }
 
-static void wake_waiter(tid_t tid)
+static void wait_remove(tid_t tid)
 {
     thread_t *thread = &threads[tid];
+    wait_queue_t *queue = thread->wait_queue;
+    if (queue == NULL || !thread->in_wait_queue) {
+        PANIC("wait remove invariant violation");
+    }
+
+    if (wait_queue_remove(queue, tid) < 0) {
+        PANIC("wait remove missing tid");
+    }
+
+    thread->in_wait_queue = 0;
+    thread->wait_queue = NULL;
+}
+
+static void timeout_remove(tid_t tid)
+{
+    thread_t *thread = &threads[tid];
+    if (!thread->in_sleep_queue) {
+        PANIC("timeout remove invariant violation");
+    }
+
+    if (sleep_queue_remove(&sleep_queue, tid) < 0) {
+        PANIC("timeout remove missing tid");
+    }
+
+    thread->in_sleep_queue = 0;
+    thread->wake_tick = 0;
+}
+
+static void wake_blocked_thread(tid_t tid, int result)
+{
+    thread_t *thread = &threads[tid];
+    if (thread->state != THREAD_BLOCKED || thread->in_ready_queue) {
+        PANIC("wake blocked invariant violation");
+    }
+
+    if (thread->in_sleep_queue) {
+        timeout_remove(tid);
+    }
+
+    if (thread->in_wait_queue) {
+        wait_remove(tid);
+    }
+
+    thread->wait_reason = THREAD_WAIT_NONE;
+    thread->wake_tick = 0;
+    thread->wait_result = result;
+    if (thread->trap_frame != NULL) {
+        thread->trap_frame->a0 = (uint64_t)(intptr_t)result;
+    }
     thread->state = THREAD_READY;
     ready_enqueue(tid);
 }
@@ -314,8 +424,11 @@ static tid_t sleep_dequeue_expired(uint64_t now)
     }
 
     thread_t *thread = &threads[tid];
-    if (thread->state != THREAD_SLEEPING || thread->queue != THREAD_QUEUE_SLEEP) {
-        PANIC("sleep queue contained non-sleeping thread");
+    if (thread->state != THREAD_BLOCKED ||
+        !thread->in_sleep_queue ||
+        (thread->wait_reason != THREAD_WAIT_SLEEP &&
+            thread->wait_reason != THREAD_WAIT_QUEUE_TIMEOUT)) {
+        PANIC("sleep queue contained non-timeout thread");
     }
 
     if (thread->wake_tick > now) {
@@ -323,7 +436,7 @@ static tid_t sleep_dequeue_expired(uint64_t now)
     }
 
     tid = sleep_queue_pop_head(&sleep_queue);
-    thread->queue = THREAD_QUEUE_NONE;
+    thread->in_sleep_queue = 0;
     return tid;
 }
 
@@ -336,9 +449,19 @@ static void wake_sleepers(uint64_t now)
         }
 
         thread_t *thread = &threads[tid];
-        thread->wake_tick = 0;
-        thread->state = THREAD_READY;
-        ready_enqueue(tid);
+        if (thread->wait_reason == THREAD_WAIT_QUEUE_TIMEOUT) {
+            if (!thread->in_wait_queue) {
+                PANIC("timed wait missing wait queue membership");
+            }
+
+            wait_remove(tid);
+            wake_blocked_thread(tid, WAIT_TIMEOUT);
+        } else if (thread->wait_reason == THREAD_WAIT_SLEEP) {
+            thread->wake_tick = 0;
+            wake_blocked_thread(tid, WAIT_OK);
+        } else {
+            PANIC("unexpected timeout wait reason");
+        }
     }
 }
 
@@ -353,7 +476,7 @@ tid_t wait_queue_wake_one(wait_queue_t *queue)
 
     tid_t tid = wait_dequeue(queue);
     if (tid != THREAD_INVALID_TID) {
-        wake_waiter(tid);
+        wake_blocked_thread(tid, WAIT_OK);
     }
 
     preempt_enable();
@@ -376,7 +499,7 @@ void wait_queue_wake_all(wait_queue_t *queue)
             break;
         }
 
-        wake_waiter(tid);
+        wake_blocked_thread(tid, WAIT_OK);
     }
 
     preempt_enable();
@@ -464,10 +587,14 @@ static void install_thread(
 
     threads[tid].tid = tid;
     threads[tid].state = THREAD_READY;
-    threads[tid].queue = THREAD_QUEUE_NONE;
+    threads[tid].wait_reason = THREAD_WAIT_NONE;
     threads[tid].wait_queue = NULL;
     threads[tid].quantum_ticks = 0;
+    threads[tid].in_ready_queue = 0;
+    threads[tid].in_sleep_queue = 0;
+    threads[tid].in_wait_queue = 0;
     threads[tid].wake_tick = 0;
+    threads[tid].wait_result = WAIT_OK;
     threads[tid].entry = entry;
     threads[tid].arg = arg;
     threads[tid].name = name;
@@ -484,12 +611,16 @@ void thread_init(void)
     for (tid_t i = 0; i < THREAD_MAX; i++) {
         threads[i].tid = i;
         threads[i].state = THREAD_UNUSED;
-        threads[i].queue = THREAD_QUEUE_NONE;
+        threads[i].wait_reason = THREAD_WAIT_NONE;
         threads[i].wait_queue = NULL;
         threads[i].kernel_sp = 0;
         threads[i].trap_frame = NULL;
         threads[i].quantum_ticks = 0;
+        threads[i].in_ready_queue = 0;
+        threads[i].in_sleep_queue = 0;
+        threads[i].in_wait_queue = 0;
         threads[i].wake_tick = 0;
+        threads[i].wait_result = WAIT_OK;
         threads[i].entry = NULL;
         threads[i].arg = NULL;
         threads[i].name = NULL;
@@ -585,6 +716,27 @@ void wait_queue_sleep(wait_queue_t *queue)
     __asm__ volatile("ecall" : : "r"(arg0), "r"(op) : "memory");
 }
 
+int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks)
+{
+    if (!threads_started) {
+        return WAIT_TIMEOUT;
+    }
+
+    if (queue == NULL) {
+        PANIC("wait_queue_sleep_timeout null queue");
+    }
+
+    if (ticks == 0) {
+        return WAIT_TIMEOUT;
+    }
+
+    register uintptr_t arg0 __asm__("a0") = (uintptr_t)queue;
+    register uint64_t arg1 __asm__("a1") = ticks;
+    register uint64_t op __asm__("a7") = THREAD_ECALL_WAIT_TIMEOUT;
+    __asm__ volatile("ecall" : "+r"(arg0) : "r"(arg1), "r"(op) : "memory");
+    return (int)(intptr_t)arg0;
+}
+
 void thread_exit(void)
 {
     register uint64_t op __asm__("a7") = THREAD_ECALL_EXIT;
@@ -653,9 +805,14 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
         prev->trap_frame = NULL;
         prev->kernel_sp = 0;
         prev->quantum_ticks = 0;
+        prev->wait_reason = THREAD_WAIT_NONE;
         prev->wait_queue = NULL;
+        prev->in_ready_queue = 0;
+        prev->in_sleep_queue = 0;
+        prev->in_wait_queue = 0;
+        prev->wake_tick = 0;
+        prev->wait_result = WAIT_OK;
         prev->state = THREAD_EXITED;
-        prev->queue = THREAD_QUEUE_NONE;
     }
 
     thread_t *next = pick_next_thread();
@@ -726,7 +883,9 @@ static trap_frame_t *sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks
     prev->trap_frame = frame;
     prev->kernel_sp = frame->sp;
     prev->quantum_ticks = 0;
-    prev->state = THREAD_SLEEPING;
+    prev->wait_reason = THREAD_WAIT_SLEEP;
+    prev->wait_result = WAIT_OK;
+    prev->state = THREAD_BLOCKED;
     sleep_enqueue(prev->tid, wake_tick);
 
     thread_t *next = pick_next_thread();
@@ -746,7 +905,11 @@ static trap_frame_t *sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks
     return next_frame;
 }
 
-static trap_frame_t *block_current_from_trap(trap_frame_t *frame, wait_queue_t *queue)
+static trap_frame_t *block_current_from_trap(
+    trap_frame_t *frame,
+    wait_queue_t *queue,
+    uint64_t timeout_ticks
+)
 {
     irq_state_t irq_state = irq_save();
     preempt_disable();
@@ -763,8 +926,15 @@ static trap_frame_t *block_current_from_trap(trap_frame_t *frame, wait_queue_t *
     prev->trap_frame = frame;
     prev->kernel_sp = frame->sp;
     prev->quantum_ticks = 0;
+    prev->wait_reason = timeout_ticks == 0 ?
+        THREAD_WAIT_QUEUE :
+        THREAD_WAIT_QUEUE_TIMEOUT;
+    prev->wait_result = WAIT_OK;
     prev->state = THREAD_BLOCKED;
     wait_enqueue(queue, prev->tid);
+    if (timeout_ticks != 0) {
+        sleep_enqueue(prev->tid, timer_ticks() + timeout_ticks);
+    }
 
     thread_t *next = pick_next_thread();
     if (next->trap_frame == NULL) {
@@ -850,7 +1020,31 @@ trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
             PANIC("null thread cannot wait");
         }
 
-        return block_current_from_trap(frame, queue);
+        return block_current_from_trap(frame, queue, 0);
+    }
+
+    if (op == THREAD_ECALL_WAIT_TIMEOUT) {
+        wait_queue_t *queue = (wait_queue_t *)(uintptr_t)arg0;
+        const uint64_t ticks = frame->a1;
+        if (queue == NULL) {
+            PANIC("timed wait ecall null queue");
+        }
+
+        if (current_thread == NULL) {
+            frame->a0 = (uint64_t)(intptr_t)WAIT_TIMEOUT;
+            return frame;
+        }
+
+        if (current_thread->tid == THREAD_NULL_TID) {
+            PANIC("null thread cannot timed wait");
+        }
+
+        if (ticks == 0) {
+            frame->a0 = (uint64_t)(intptr_t)WAIT_TIMEOUT;
+            return frame;
+        }
+
+        return block_current_from_trap(frame, queue, ticks);
     }
 
     PANIC("unknown thread ecall");

@@ -19,7 +19,7 @@ static void demo_thread_a(void *arg)
     mutex_lock(&demo_mutex);
     console_write("thread: mutex-a acquired\n");
     demo_shared_counter++;
-    thread_yield();
+    thread_sleep(20);
     console_write("thread: mutex-a unlocking\n");
     mutex_unlock(&demo_mutex);
     thread_exit();
@@ -29,12 +29,25 @@ static void demo_thread_b(void *arg)
 {
     (void)arg;
 
-    console_write("thread: mutex-b waiting\n");
+    console_write("thread: mutex-b timed wait\n");
+    if (mutex_lock_timeout(&demo_mutex, 5) != WAIT_TIMEOUT) {
+        PANIC("mutex-b acquired unexpectedly");
+    }
+    console_write("thread: mutex-b timed out\n");
+    thread_exit();
+}
+
+static void demo_thread_c(void *arg)
+{
+    (void)arg;
+
+    thread_sleep(30);
+    console_write("thread: mutex-c locking\n");
     mutex_lock(&demo_mutex);
-    console_write("thread: mutex-b acquired\n");
+    console_write("thread: mutex-c acquired\n");
     demo_shared_counter++;
     mutex_unlock(&demo_mutex);
-    console_write("milestone 8: mutexes\n");
+    console_write("milestone 9: timed waits\n");
     thread_exit();
 }
 
@@ -72,6 +85,9 @@ void kmain(void)
     }
     if (thread_create("demo-b", demo_thread_b, NULL) < 0) {
         PANIC("failed to create demo-b");
+    }
+    if (thread_create("demo-c", demo_thread_c, NULL) < 0) {
+        PANIC("failed to create demo-c");
     }
     thread_start();
 }

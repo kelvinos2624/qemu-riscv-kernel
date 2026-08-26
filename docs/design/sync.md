@@ -23,6 +23,7 @@ typedef struct mutex mutex_t;
 
 void mutex_init(mutex_t *mutex, const char *name);
 void mutex_lock(mutex_t *mutex);
+int mutex_lock_timeout(mutex_t *mutex, uint64_t ticks);
 int mutex_trylock(mutex_t *mutex);
 void mutex_unlock(mutex_t *mutex);
 ```
@@ -61,6 +62,13 @@ cleanup.
 - returns `0` if another thread owns it
 - panics on recursive acquisition
 
+`mutex_lock_timeout()` is the timeout-aware acquisition path:
+
+- returns `WAIT_OK` if the mutex was acquired
+- returns `WAIT_TIMEOUT` if the timeout expired first
+- treats `ticks == 0` like a failed trylock when the mutex is already owned
+- panics on recursive acquisition
+
 ## Blocking and Lost Wakeups
 
 `mutex_lock()` disables interrupts around the owner check and the transition
@@ -74,6 +82,12 @@ window between:
 The thread still blocks through the normal trap path. Interrupt masking is used
 as a short scheduler-state critical section, not as the mutex implementation
 itself.
+
+For timed mutex waits, the blocked thread is linked into both the mutex wait
+queue and the timeout queue. If unlock wins first, the timeout entry is
+cancelled. If the timer wins first, the waiter is removed from the mutex wait
+queue before it becomes ready. That prevents a timed-out thread from receiving
+ownership later.
 
 This is the same design boundary as the ECE350/STM32 RTOS distinction between
 short critical sections and blocking synchronization. A spinlock or interrupt
@@ -111,20 +125,20 @@ exist, then restore or recompute priority on unlock.
 ## Future Work
 
 - Add owner-death checks or per-thread owned-mutex tracking.
-- Add timed mutex waits once wait queues support timeout composition.
 - Replace FIFO waiter selection with scheduler-aware selection if priorities,
   EDF, or MLFQ are introduced.
 - Add priority-inheritance experiments once thread priorities exist.
 
 ## Test Evidence
 
-The QEMU smoke test creates two demo threads:
+The QEMU smoke test creates three demo threads:
 
-1. thread A locks the mutex and yields while holding it
-2. thread B attempts to lock and blocks on the mutex wait queue
-3. thread A unlocks
-4. ownership transfers to thread B
-5. thread B resumes and completes the milestone banner
+1. thread A locks the mutex and sleeps while holding it
+2. thread B attempts a short timed lock and times out
+3. the null task runs while all real threads are blocked
+4. thread A unlocks after its sleep expires
+5. thread C later locks the mutex successfully
 
-The expected UART sequence proves both blocking and FIFO owner transfer for the
-current round-robin scheduler.
+The expected UART sequence proves timeout cancellation: thread B must be
+removed from the mutex wait queue when it times out, otherwise a later unlock
+could transfer ownership to the wrong thread.

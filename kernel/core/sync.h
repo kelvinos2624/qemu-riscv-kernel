@@ -13,6 +13,7 @@ typedef struct mutex {
 
 void mutex_init(mutex_t *mutex, const char *name);
 void mutex_lock(mutex_t *mutex);
+int mutex_lock_timeout(mutex_t *mutex, uint64_t ticks);
 int mutex_trylock(mutex_t *mutex);
 void mutex_unlock(mutex_t *mutex);
 
