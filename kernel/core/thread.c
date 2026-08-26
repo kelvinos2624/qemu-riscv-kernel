@@ -1,6 +1,7 @@
 #include "arch/riscv64/irq.h"
 #include "core/kernel.h"
 #include "core/thread.h"
+#include "core/trace.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
 
@@ -406,6 +407,13 @@ static void wake_blocked_thread(tid_t tid, int result)
         wait_remove(tid);
     }
 
+    trace_emit(
+        result == WAIT_TIMEOUT ? TRACE_WAIT_TIMEOUT : TRACE_WAIT_WAKE,
+        tid,
+        THREAD_INVALID_TID,
+        (uint64_t)(intptr_t)result
+    );
+
     thread->wait_reason = THREAD_WAIT_NONE;
     thread->wake_tick = 0;
     thread->wait_result = result;
@@ -455,9 +463,21 @@ static void wake_sleepers(uint64_t now)
             }
 
             wait_remove(tid);
+            trace_emit(
+                TRACE_THREAD_WAKE,
+                tid,
+                THREAD_INVALID_TID,
+                (uint64_t)(intptr_t)WAIT_TIMEOUT
+            );
             wake_blocked_thread(tid, WAIT_TIMEOUT);
         } else if (thread->wait_reason == THREAD_WAIT_SLEEP) {
             thread->wake_tick = 0;
+            trace_emit(
+                TRACE_THREAD_WAKE,
+                tid,
+                THREAD_INVALID_TID,
+                (uint64_t)(intptr_t)WAIT_OK
+            );
             wake_blocked_thread(tid, WAIT_OK);
         } else {
             PANIC("unexpected timeout wait reason");
@@ -605,6 +625,7 @@ void thread_init(void)
 {
     irq_state_t irq_state = irq_save();
 
+    trace_init();
     tid_queue_init(&ready_queue);
     sleep_queue_init(&sleep_queue);
 
@@ -651,6 +672,7 @@ int thread_create(const char *name, void (*entry)(void *arg), void *arg)
         if (threads[tid].state == THREAD_UNUSED || threads[tid].state == THREAD_EXITED) {
             install_thread(tid, name, entry, arg);
             ready_enqueue(tid);
+            trace_emit(TRACE_THREAD_CREATE, tid, THREAD_INVALID_TID, 0);
             irq_restore(irq_state);
             return tid;
         }
@@ -673,6 +695,7 @@ void thread_start(void)
     next->quantum_ticks = 0;
     current_thread = next;
     threads_started = 1;
+    trace_emit(TRACE_CONTEXT_SWITCH, THREAD_INVALID_TID, next->tid, 0);
 
     console_write("thread: starting scheduler\n");
 
@@ -824,6 +847,15 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
     next->quantum_ticks = 0;
     current_thread = next;
     reschedule_requested = 0;
+    trace_emit(
+        requeue_current ? TRACE_CONTEXT_SWITCH : TRACE_THREAD_EXIT,
+        prev->tid,
+        next->tid,
+        requeue_current ? 0 : 1
+    );
+    if (!requeue_current) {
+        trace_emit(TRACE_CONTEXT_SWITCH, prev->tid, next->tid, 0);
+    }
 
     trap_frame_t *next_frame = next->trap_frame;
 
@@ -857,6 +889,7 @@ static trap_frame_t *switch_null_to_next_from_trap(trap_frame_t *frame)
     next->quantum_ticks = 0;
     current_thread = next;
     reschedule_requested = 0;
+    trace_emit(TRACE_CONTEXT_SWITCH, prev->tid, next->tid, 0);
 
     trap_frame_t *next_frame = next->trap_frame;
 
@@ -887,6 +920,7 @@ static trap_frame_t *sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks
     prev->wait_result = WAIT_OK;
     prev->state = THREAD_BLOCKED;
     sleep_enqueue(prev->tid, wake_tick);
+    trace_emit(TRACE_THREAD_SLEEP, prev->tid, THREAD_INVALID_TID, wake_tick);
 
     thread_t *next = pick_next_thread();
     if (next->trap_frame == NULL) {
@@ -897,6 +931,7 @@ static trap_frame_t *sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks
     next->quantum_ticks = 0;
     current_thread = next;
     reschedule_requested = 0;
+    trace_emit(TRACE_CONTEXT_SWITCH, prev->tid, next->tid, 0);
 
     trap_frame_t *next_frame = next->trap_frame;
 
@@ -935,6 +970,7 @@ static trap_frame_t *block_current_from_trap(
     if (timeout_ticks != 0) {
         sleep_enqueue(prev->tid, timer_ticks() + timeout_ticks);
     }
+    trace_emit(TRACE_WAIT_BLOCK, prev->tid, THREAD_INVALID_TID, timeout_ticks);
 
     thread_t *next = pick_next_thread();
     if (next->trap_frame == NULL) {
@@ -945,6 +981,7 @@ static trap_frame_t *block_current_from_trap(
     next->quantum_ticks = 0;
     current_thread = next;
     reschedule_requested = 0;
+    trace_emit(TRACE_CONTEXT_SWITCH, prev->tid, next->tid, 0);
 
     trap_frame_t *next_frame = next->trap_frame;
 
@@ -1087,6 +1124,7 @@ static void null_task(void *arg)
 {
     (void)arg;
     irq_enable();
+    trace_emit(TRACE_IDLE, THREAD_NULL_TID, THREAD_INVALID_TID, 0);
     console_write("thread: null idle\n");
 
     for (;;) {

@@ -295,5 +295,4 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add scheduler tracing for context switch events.
 - Add priority-inversion experiments.
