@@ -51,6 +51,50 @@ void mutex_lock(mutex_t *mutex)
     irq_restore(irq_state);
 }
 
+int mutex_lock_timeout(mutex_t *mutex, uint64_t ticks)
+{
+    if (mutex == NULL) {
+        PANIC("mutex_lock_timeout null mutex");
+    }
+
+    irq_state_t irq_state = irq_save();
+    tid_t tid = require_thread_context();
+
+    if (mutex->owner == tid) {
+        PANIC("recursive mutex timed lock");
+    }
+
+    if (mutex->owner == MUTEX_NO_OWNER) {
+        mutex->owner = tid;
+        irq_restore(irq_state);
+        return WAIT_OK;
+    }
+
+    if (ticks == 0) {
+        irq_restore(irq_state);
+        return WAIT_TIMEOUT;
+    }
+
+    while (mutex->owner != MUTEX_NO_OWNER) {
+        int result = wait_queue_sleep_timeout(&mutex->waiters, ticks);
+        if (result == WAIT_TIMEOUT) {
+            irq_restore(irq_state);
+            return WAIT_TIMEOUT;
+        }
+
+        if (mutex->owner != tid) {
+            PANIC("timed mutex wake without ownership");
+        }
+
+        irq_restore(irq_state);
+        return WAIT_OK;
+    }
+
+    mutex->owner = tid;
+    irq_restore(irq_state);
+    return WAIT_OK;
+}
+
 int mutex_trylock(mutex_t *mutex)
 {
     if (mutex == NULL) {

@@ -12,15 +12,16 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[#########-----------] 45%`
+Progress: `[##########----------] 50%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
 round-robin kernel threads using trap-frame-based switching. It also supports
 tick-based `thread_sleep()` through an absolute-deadline sleep queue and
 event-style blocking through wait queues. It now includes non-recursive kernel
-mutexes with FIFO owner transfer. Memory management, userspace isolation,
-syscalls, and the simulated accelerator driver remain future milestones.
+mutexes with FIFO owner transfer and timeout-aware blocking. Memory management,
+userspace isolation, syscalls, and the simulated accelerator driver remain
+future milestones.
 
 ## Project Goals
 
@@ -90,15 +91,17 @@ Kernel thread scheduling setup is complete:
 - machine-mode `ecall` path for `thread_yield()` and `thread_exit()`
 - timer-driven preemptive FIFO round-robin
 - trap-frame-based thread switching on trap return
-- queue ownership tracking to prevent duplicate ready-queue entries
+- queue membership tracking to support timeout-aware blocking
 - `thread_sleep(ticks)` with a sorted absolute-deadline sleep queue
 - FIFO wait queues for event-style blocking and wakeups
 - non-recursive kernel mutexes built on wait queues
+- timeout-aware waits and `mutex_lock_timeout()`
 - `thread_exit()` for retiring finished threads
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Timed waits and scheduler tracing are the next scheduling milestones.
+Scheduler tracing and priority-inversion experiments are the next scheduling
+milestones.
 
 Expected boot output:
 
@@ -116,11 +119,13 @@ thread: initialized static table, null tid=0
 thread: starting scheduler
 thread: mutex-a locking
 thread: mutex-a acquired
-thread: mutex-b waiting
-thread: mutex-a unlocking
-thread: mutex-b acquired
-milestone 8: mutexes
+thread: mutex-b timed wait
 thread: null idle
+thread: mutex-b timed out
+thread: mutex-a unlocking
+thread: mutex-c locking
+thread: mutex-c acquired
+milestone 9: timed waits
 ```
 
 ## Planned Architecture
@@ -133,7 +138,8 @@ The system will grow through five major deliverables.
 
 2. Scheduling and synchronization
    Preemptive round-robin scheduling, sleep queues, wait queues, mutexes,
-   blocking wakeups, and eventually priority-inversion experiments.
+   timeout-aware blocking wakeups, and eventually priority-inversion
+   experiments.
 
 3. Virtual memory and allocation
    Physical page allocation, kernel heap support, page-table creation,
@@ -233,10 +239,11 @@ make toolcheck
 
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
-the kernel's UART output. It currently checks wait queue blocking and FIFO
-wakeup ordering through the mutex demo without requiring an in-kernel unit-test
-framework. The current test verifies that a contended mutex blocks one thread
-and transfers ownership to the oldest waiter.
+the kernel's UART output. It currently checks timeout-aware mutex blocking
+without requiring an in-kernel unit-test framework. The current test verifies
+that one thread times out while waiting for a mutex, the idle task runs while
+all real threads are blocked, and a later thread can still acquire the mutex
+after the owner unlocks.
 
 Planned test categories:
 

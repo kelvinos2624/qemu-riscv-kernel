@@ -36,6 +36,9 @@ also panics.
 transferred to that waiter before it runs. If no waiter exists, the mutex
 becomes unlocked.
 
+Timed mutex waits are added later by composing this owner-transfer policy with
+wait queue timeout cancellation.
+
 `wait_queue_wake_one()` now returns the TID it woke, or `THREAD_INVALID_TID`
 when the queue was empty. This keeps owner-transfer policy in `sync.c` without
 exposing wait queue internals.

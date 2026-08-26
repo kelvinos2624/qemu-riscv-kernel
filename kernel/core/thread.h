@@ -8,6 +8,8 @@
 #define THREAD_MAX 8
 #define THREAD_STACK_SIZE 4096
 #define THREAD_QUANTUM_TICKS 10
+#define WAIT_OK 0
+#define WAIT_TIMEOUT (-1)
 
 typedef uint16_t tid_t;
 struct trap_frame;
@@ -25,26 +27,29 @@ typedef enum {
     THREAD_READY,
     THREAD_RUNNING,
     THREAD_BLOCKED,
-    THREAD_SLEEPING,
     THREAD_EXITED
 } thread_state_t;
 
 typedef enum {
-    THREAD_QUEUE_NONE = 0,
-    THREAD_QUEUE_READY,
-    THREAD_QUEUE_SLEEP,
-    THREAD_QUEUE_WAIT
-} thread_queue_t;
+    THREAD_WAIT_NONE = 0,
+    THREAD_WAIT_SLEEP,
+    THREAD_WAIT_QUEUE,
+    THREAD_WAIT_QUEUE_TIMEOUT
+} thread_wait_reason_t;
 
 typedef struct thread {
     tid_t tid;
     thread_state_t state;
-    thread_queue_t queue;
+    thread_wait_reason_t wait_reason;
     wait_queue_t *wait_queue;
     uintptr_t kernel_sp;
     struct trap_frame *trap_frame;
     uint16_t quantum_ticks;
+    uint8_t in_ready_queue;
+    uint8_t in_sleep_queue;
+    uint8_t in_wait_queue;
     uint64_t wake_tick;
+    int wait_result;
     void (*entry)(void *arg);
     void *arg;
     const char *name;
@@ -60,6 +65,7 @@ tid_t thread_current_tid(void);
 const thread_t *thread_current(void);
 void wait_queue_init(wait_queue_t *queue, const char *name);
 void wait_queue_sleep(wait_queue_t *queue);
+int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks);
 tid_t wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 void thread_on_timer_tick(void);

@@ -9,11 +9,13 @@ import time
 EXPECTED_SEQUENCE = [
     "thread: mutex-a locking",
     "thread: mutex-a acquired",
-    "thread: mutex-b waiting",
-    "thread: mutex-a unlocking",
-    "thread: mutex-b acquired",
-    "milestone 8: mutexes",
+    "thread: mutex-b timed wait",
     "thread: null idle",
+    "thread: mutex-b timed out",
+    "thread: mutex-a unlocking",
+    "thread: mutex-c locking",
+    "thread: mutex-c acquired",
+    "milestone 9: timed waits",
 ]
 TIMEOUT_SECONDS = 5.0
 
@@ -21,7 +23,7 @@ TIMEOUT_SECONDS = 5.0
 def is_relevant_line(line: str) -> bool:
     return (
         line.startswith("thread: mutex-")
-        or line.startswith("milestone 8:")
+        or line.startswith("milestone 9:")
         or line.startswith("thread: null idle")
     )
 
@@ -87,7 +89,7 @@ def main() -> int:
                                 return 1
                             expected_index += 1
                         if expected_index == len(EXPECTED_SEQUENCE):
-                            print("qemu smoke test: observed mutex sequence")
+                            print("qemu smoke test: observed timed wait sequence")
                             return 0
 
             if proc.poll() is not None:
@@ -101,7 +103,7 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe mutex sequence", file=sys.stderr)
+    print("qemu smoke test: did not observe timed wait sequence", file=sys.stderr)
     print(
         f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
         file=sys.stderr,

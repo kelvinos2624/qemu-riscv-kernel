@@ -7,7 +7,7 @@ scheduling. The kernel can initialize a thread subsystem, create threads, start
 scheduling, voluntarily yield between threads, preempt CPU-bound threads from
 the timer interrupt path, put threads to sleep until a future tick, and retire
 exited threads. It also supports FIFO wait queues for blocking on kernel-owned
-events.
+events and timeout-aware event waits.
 
 All threads in this milestone run in RISC-V machine mode. They are kernel
 threads, not user tasks: there is no address-space separation, user stack,
@@ -27,6 +27,7 @@ void thread_exit(void);
 tid_t thread_current_tid(void);
 void wait_queue_init(wait_queue_t *queue, const char *name);
 void wait_queue_sleep(wait_queue_t *queue);
+int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks);
 tid_t wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 ```
@@ -76,16 +77,18 @@ kernel has a heap or page allocator.
 The ready queue stores TIDs rather than `thread_t *` pointers. The TCB table
 owns thread storage; queues own scheduling order.
 
-Each TCB also tracks its current queue owner:
+Each TCB tracks blocked-state metadata and explicit queue membership:
 
-- `THREAD_QUEUE_NONE`
-- `THREAD_QUEUE_READY`
-- `THREAD_QUEUE_SLEEP`
-- `THREAD_QUEUE_WAIT`
+- `wait_reason`: why a blocked thread is waiting
+- `in_ready_queue`: whether the TID is in the ready queue
+- `in_sleep_queue`: whether the TID is in the timeout queue
+- `in_wait_queue`: whether the TID is in an event wait queue
 
-`THREAD_QUEUE_READY`, `THREAD_QUEUE_SLEEP`, and `THREAD_QUEUE_WAIT` are active.
-The same "one queue owner per thread" invariant prevents a thread from being
-ready, sleeping, and event-blocked at the same time.
+Timed waits may be linked into both the sleep queue and a wait queue. This is
+why the older single queue-owner enum was replaced by explicit membership
+flags. A non-timed thread is still in at most one scheduling queue at a time,
+but a timed event wait needs dual membership so either the event or the timeout
+can win.
 
 ## Context Switching
 
@@ -137,9 +140,9 @@ Queue semantics:
 - timer ticks increment the current thread's quantum counter. Once it reaches
   `THREAD_QUANTUM_TICKS`, the scheduler requests preemption.
 - `thread_sleep(ticks)` enters the trap path with a machine-mode `ecall`. For a
-  positive tick count, the current real thread becomes `THREAD_SLEEPING`, stores
-  an absolute `wake_tick`, enters the sleep queue, and the scheduler selects the
-  next ready thread.
+  positive tick count, the current real thread becomes `THREAD_BLOCKED` with
+  `THREAD_WAIT_SLEEP`, stores an absolute `wake_tick`, enters the sleep queue,
+  and the scheduler selects the next ready thread.
 - `thread_sleep(0)` behaves like `thread_yield()` for real threads.
 - `thread_exit()` marks the current real thread `THREAD_EXITED` and does not
   requeue it.
@@ -160,13 +163,16 @@ The sleep queue uses absolute wake ticks:
 wake_tick = timer_ticks() + ticks;
 ```
 
-Sleeping threads are kept in a sorted fixed array of TIDs. The head has the
-earliest `wake_tick`, and same-deadline sleepers keep insertion order. On each
-timer tick, `thread_on_timer_tick()` wakes expired sleepers from the head:
+Sleeping and timeout-blocked threads are kept in a sorted fixed array of TIDs.
+The head has the earliest `wake_tick`, and same-deadline sleepers keep
+insertion order. On each timer tick, `thread_on_timer_tick()` wakes expired
+sleepers from the head:
 
-1. `THREAD_SLEEPING -> THREAD_READY`
-2. `THREAD_QUEUE_SLEEP -> THREAD_QUEUE_NONE`
-3. append to the ready queue tail
+1. clear sleep-queue membership
+2. cancel wait-queue membership if this was a timed event wait
+3. store `WAIT_TIMEOUT` for timed event waits
+4. transition `THREAD_BLOCKED -> THREAD_READY`
+5. append to the ready queue tail
 
 The timer driver does not manipulate the sleep queue directly. It updates
 hardware timer state and calls the scheduler tick hook.
@@ -199,10 +205,13 @@ for unrelated events would make FIFO wake order meaningless.
 Current wait queue semantics:
 
 - `wait_queue_sleep(queue)` enters the trap path with a machine-mode `ecall`.
-- the current real thread becomes `THREAD_BLOCKED`.
-- the thread enters `queue` in FIFO order with `THREAD_QUEUE_WAIT` ownership.
+- the current real thread becomes `THREAD_BLOCKED` with `THREAD_WAIT_QUEUE`.
+- the thread enters `queue` in FIFO order.
+- `wait_queue_sleep_timeout(queue, ticks)` enters both the wait queue and the
+  timeout queue, using `THREAD_WAIT_QUEUE_TIMEOUT`.
 - `wait_queue_wake_one(queue)` removes the oldest waiter, appends it to the
-  ready queue tail, and returns the selected TID.
+  ready queue tail, returns the selected TID, and cancels its timeout entry if
+  it was a timed wait.
 - `wait_queue_wake_all(queue)` repeats that until the queue is empty.
 
 Wakeup means "the condition may now be true", not "the condition is guaranteed
@@ -224,17 +233,51 @@ This maps to the ECE350/STM32 RTOS model where a task leaves the ready list
 while waiting for a kernel event, then re-enters READY when another kernel path
 signals that event.
 
+## Timed Waits
+
+Timed waits compose event blocking with absolute-deadline timeout blocking:
+
+```c
+int result = wait_queue_sleep_timeout(&queue, ticks);
+```
+
+The return value is:
+
+- `WAIT_OK`: the event wake path won
+- `WAIT_TIMEOUT`: the timeout path won
+
+`ticks == 0` returns `WAIT_TIMEOUT` without blocking. Infinite waits remain the
+existing `wait_queue_sleep(queue)` API.
+
+A timed waiter has:
+
+- `state = THREAD_BLOCKED`
+- `wait_reason = THREAD_WAIT_QUEUE_TIMEOUT`
+- `in_wait_queue = 1`
+- `in_sleep_queue = 1`
+- `wait_queue = queue`
+- `wake_tick = timer_ticks() + ticks`
+
+Whichever path wins cancels the other membership. If an event wakes the thread,
+the timeout entry is removed from the sleep queue. If the timer expires first,
+the waiter is removed from the wait queue. Both removals are linear scans over
+bounded arrays, which is acceptable for `THREAD_MAX = 8` and is not on the
+uncontended mutex fast path. If the kernel grows many timed waiters, the likely
+upgrade path is intrusive list nodes, a min-heap with cancellation handles, or a
+timer wheel.
+
+If an event wake and timeout are both possible at the same tick, execution order
+wins. The kernel path that processes the thread first decides the result.
+
 Thread states for this milestone:
 
 - `THREAD_UNUSED`
 - `THREAD_READY`
 - `THREAD_RUNNING`
 - `THREAD_BLOCKED`
-- `THREAD_SLEEPING`
 - `THREAD_EXITED`
 
-Mutex ownership is implemented in `kernel/core/sync.c`, while timed waits come
-later.
+Mutex ownership and mutex timeout policy are implemented in `kernel/core/sync.c`.
 
 ## Interrupt Safety
 
@@ -252,5 +295,5 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add timed waits.
 - Add scheduler tracing for context switch events.
+- Add priority-inversion experiments.
