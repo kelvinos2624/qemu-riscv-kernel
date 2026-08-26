@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[############--------] 60%`
+Progress: `[#############-------] 65%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
@@ -22,9 +22,10 @@ event-style blocking through wait queues. It now includes non-recursive kernel
 mutexes with FIFO owner transfer, timeout-aware blocking, and structured
 scheduler tracing. The scheduling and synchronization section is complete for
 the current round-robin scope; priority-inversion experiments are deferred until
-the kernel has a real priority scheduler. Memory management, userspace
-isolation, syscalls, and the simulated accelerator driver remain future
-milestones.
+the kernel has a real priority scheduler. The virtual-memory and allocation
+section has started with a bitmap physical page allocator. Kernel heap support,
+page tables, userspace isolation, syscalls, and the simulated accelerator driver
+remain future milestones.
 
 ## Project Goals
 
@@ -105,7 +106,19 @@ Kernel thread scheduling setup is complete:
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-The next major project section is virtual memory and allocation.
+Virtual memory and allocation setup has begun:
+
+- linker-provided RAM bounds for the current QEMU `virt` memory contract
+- 4 KiB physical page granularity matching RISC-V Sv39 base pages
+- linker-reserved allocator bitmap metadata
+- bitmap-backed `page_alloc()` / `page_free()`
+- free-count and managed-range introspection
+- invalid-free and double-free detection through kernel panics
+- interrupt masking around allocator metadata
+- boot self-test for alignment, reuse, exhaustion, and count restoration
+
+The next memory milestones are kernel heap support, page-table primitives,
+kernel paging, page-fault diagnostics, userspace mappings, and safe usercopy.
 
 Expected boot output:
 
@@ -119,6 +132,8 @@ milestone 2: trap vector setup
 timer: interval=...
 timer: observed ... ticks
 milestone 2: timer interrupt setup
+page: managed_start=... managed_end=... total=...
+milestone 11: physical page allocator
 thread: initialized static table, null tid=0
 thread: starting scheduler
 thread: mutex-a locking
@@ -271,12 +286,14 @@ make CONFIG_TRACE=0
 
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
-the kernel's UART output. It currently checks timeout-aware mutex blocking and
-selected scheduler trace events without requiring an in-kernel unit-test
-framework. The current test verifies that one thread times out while waiting for
-a mutex, the idle task runs while all real threads are blocked, a later thread
-can still acquire the mutex after the owner unlocks, and the trace dump includes
-key events such as context switches, idle entry, wait timeout, and mutex timeout.
+the kernel's UART output. It currently checks the physical page allocator
+self-test milestone, timeout-aware mutex blocking, and selected scheduler trace
+events without requiring an in-kernel unit-test framework. The current test
+verifies that the allocator initializes and survives its boot self-test, one
+thread times out while waiting for a mutex, the idle task runs while all real
+threads are blocked, a later thread can still acquire the mutex after the owner
+unlocks, and the trace dump includes key events such as context switches, idle
+entry, wait timeout, and mutex timeout.
 
 Planned test categories:
 
