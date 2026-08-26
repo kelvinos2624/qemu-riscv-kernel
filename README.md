@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[###########---------] 55%`
+Progress: `[############--------] 60%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
@@ -20,8 +20,11 @@ round-robin kernel threads using trap-frame-based switching. It also supports
 tick-based `thread_sleep()` through an absolute-deadline sleep queue and
 event-style blocking through wait queues. It now includes non-recursive kernel
 mutexes with FIFO owner transfer, timeout-aware blocking, and structured
-scheduler tracing. Memory management, userspace isolation, syscalls, and the
-simulated accelerator driver remain future milestones.
+scheduler tracing. The scheduling and synchronization section is complete for
+the current round-robin scope; priority-inversion experiments are deferred until
+the kernel has a real priority scheduler. Memory management, userspace
+isolation, syscalls, and the simulated accelerator driver remain future
+milestones.
 
 ## Project Goals
 
@@ -97,11 +100,12 @@ Kernel thread scheduling setup is complete:
 - non-recursive kernel mutexes built on wait queues
 - timeout-aware waits and `mutex_lock_timeout()`
 - structured in-memory scheduler traces with explicit UART dump
+- documented priority-inversion limitation for future priority scheduling
 - `thread_exit()` for retiring finished threads
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Priority-inversion experiments are the next scheduling milestone.
+The next major project section is virtual memory and allocation.
 
 Expected boot output:
 
@@ -142,8 +146,8 @@ The system will grow through five major deliverables.
 
 2. Scheduling and synchronization
    Preemptive round-robin scheduling, sleep queues, wait queues, mutexes,
-   timeout-aware blocking wakeups, and eventually priority-inversion
-   experiments.
+   timeout-aware blocking wakeups, scheduler tracing, and documented
+   priority-inversion prerequisites.
 
 3. Virtual memory and allocation
    Physical page allocation, kernel heap support, page-table creation,
@@ -177,6 +181,23 @@ across many hardware domains:
 
 Userspace will submit accelerator work through syscalls and a thin runtime
 library. It will not access MMIO directly.
+
+## Deferred Scheduling Extension
+
+Priority inversion is intentionally not demonstrated in the current scheduler.
+The kernel uses preemptive FIFO round-robin scheduling and has no thread
+priority model, so there is no real priority relationship to invert.
+
+A future priority-scheduling extension should add:
+
+- static or dynamic thread priorities
+- priority-aware ready queues
+- priority-aware mutex waiter selection
+- priority inheritance or priority ceiling experiments
+
+The existing mutex ownership model and scheduler trace buffer provide the
+foundation for that work, but implementing a fake inversion demo on top of
+round-robin scheduling would be technically misleading.
 
 ## Repository Layout
 
