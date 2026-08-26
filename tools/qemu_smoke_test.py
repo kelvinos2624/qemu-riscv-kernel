@@ -15,15 +15,24 @@ EXPECTED_SEQUENCE = [
     "thread: mutex-a unlocking",
     "thread: mutex-c locking",
     "thread: mutex-c acquired",
-    "milestone 9: timed waits",
+    "milestone 10: scheduler tracing",
+    "trace: begin",
+    "trace: end",
 ]
-TIMEOUT_SECONDS = 5.0
+REQUIRED_TRACE_TYPES = [
+    "context_switch",
+    "wait_timeout",
+    "mutex_timeout",
+    "idle",
+]
+TIMEOUT_SECONDS = 10.0
 
 
 def is_relevant_line(line: str) -> bool:
     return (
         line.startswith("thread: mutex-")
-        or line.startswith("milestone 9:")
+        or line.startswith("milestone 10:")
+        or line.startswith("trace:")
         or line.startswith("thread: null idle")
     )
 
@@ -61,6 +70,7 @@ def main() -> int:
 
     output = []
     observed_sequence = []
+    observed_trace_types = set()
     expected_index = 0
     deadline = time.monotonic() + TIMEOUT_SECONDS
 
@@ -74,8 +84,22 @@ def main() -> int:
                         output.append(line)
                         stripped_line = line.strip()
                         if is_relevant_line(stripped_line):
+                            if stripped_line.startswith("trace: seq="):
+                                marker = " type="
+                                type_start = stripped_line.find(marker)
+                                if type_start >= 0:
+                                    type_start += len(marker)
+                                    type_end = stripped_line.find(" ", type_start)
+                                    observed_trace_types.add(stripped_line[type_start:type_end])
+                                continue
+
+                            if stripped_line.startswith("trace: begin"):
+                                sequence_line = "trace: begin"
+                            else:
+                                sequence_line = stripped_line
+
                             observed_sequence.append(stripped_line)
-                            if stripped_line != EXPECTED_SEQUENCE[expected_index]:
+                            if sequence_line != EXPECTED_SEQUENCE[expected_index]:
                                 print(
                                     "qemu smoke test: scheduler sequence mismatch",
                                     file=sys.stderr,
@@ -89,7 +113,23 @@ def main() -> int:
                                 return 1
                             expected_index += 1
                         if expected_index == len(EXPECTED_SEQUENCE):
-                            print("qemu smoke test: observed timed wait sequence")
+                            missing_trace_types = [
+                                trace_type for trace_type in REQUIRED_TRACE_TYPES
+                                if trace_type not in observed_trace_types
+                            ]
+                            if missing_trace_types:
+                                print(
+                                    "qemu smoke test: missing trace types",
+                                    file=sys.stderr,
+                                )
+                                print(
+                                    f"missing: {missing_trace_types}",
+                                    file=sys.stderr,
+                                )
+                                print("".join(output), file=sys.stderr)
+                                return 1
+
+                            print("qemu smoke test: observed scheduler trace sequence")
                             return 0
 
             if proc.poll() is not None:
@@ -103,12 +143,13 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe timed wait sequence", file=sys.stderr)
+    print("qemu smoke test: did not observe scheduler trace sequence", file=sys.stderr)
     print(
         f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
         file=sys.stderr,
     )
     print(f"observed sequence: {observed_sequence}", file=sys.stderr)
+    print(f"observed trace types: {sorted(observed_trace_types)}", file=sys.stderr)
     print("".join(output), file=sys.stderr)
     return 1
 

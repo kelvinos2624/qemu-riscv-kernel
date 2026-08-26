@@ -1,6 +1,7 @@
 #include "core/kernel.h"
 #include "core/sync.h"
 #include "core/thread.h"
+#include "core/trace.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
 
@@ -47,7 +48,8 @@ static void demo_thread_c(void *arg)
     console_write("thread: mutex-c acquired\n");
     demo_shared_counter++;
     mutex_unlock(&demo_mutex);
-    console_write("milestone 9: timed waits\n");
+    console_write("milestone 10: scheduler tracing\n");
+    trace_dump();
     thread_exit();
 }
 

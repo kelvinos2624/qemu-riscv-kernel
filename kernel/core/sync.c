@@ -1,6 +1,7 @@
 #include "arch/riscv64/irq.h"
 #include "core/kernel.h"
 #include "core/sync.h"
+#include "core/trace.h"
 
 static tid_t require_thread_context(void)
 {
@@ -39,15 +40,18 @@ void mutex_lock(mutex_t *mutex)
     }
 
     while (mutex->owner != MUTEX_NO_OWNER) {
+        trace_emit(TRACE_MUTEX_BLOCK, tid, mutex->owner, 0);
         wait_queue_sleep(&mutex->waiters);
 
         if (mutex->owner == tid) {
+            trace_emit(TRACE_MUTEX_LOCK, tid, THREAD_INVALID_TID, 0);
             irq_restore(irq_state);
             return;
         }
     }
 
     mutex->owner = tid;
+    trace_emit(TRACE_MUTEX_LOCK, tid, THREAD_INVALID_TID, 0);
     irq_restore(irq_state);
 }
 
@@ -66,6 +70,7 @@ int mutex_lock_timeout(mutex_t *mutex, uint64_t ticks)
 
     if (mutex->owner == MUTEX_NO_OWNER) {
         mutex->owner = tid;
+        trace_emit(TRACE_MUTEX_LOCK, tid, THREAD_INVALID_TID, 0);
         irq_restore(irq_state);
         return WAIT_OK;
     }
@@ -76,8 +81,10 @@ int mutex_lock_timeout(mutex_t *mutex, uint64_t ticks)
     }
 
     while (mutex->owner != MUTEX_NO_OWNER) {
+        trace_emit(TRACE_MUTEX_BLOCK, tid, mutex->owner, ticks);
         int result = wait_queue_sleep_timeout(&mutex->waiters, ticks);
         if (result == WAIT_TIMEOUT) {
+            trace_emit(TRACE_MUTEX_TIMEOUT, tid, THREAD_INVALID_TID, ticks);
             irq_restore(irq_state);
             return WAIT_TIMEOUT;
         }
@@ -86,11 +93,13 @@ int mutex_lock_timeout(mutex_t *mutex, uint64_t ticks)
             PANIC("timed mutex wake without ownership");
         }
 
+        trace_emit(TRACE_MUTEX_LOCK, tid, THREAD_INVALID_TID, ticks);
         irq_restore(irq_state);
         return WAIT_OK;
     }
 
     mutex->owner = tid;
+    trace_emit(TRACE_MUTEX_LOCK, tid, THREAD_INVALID_TID, 0);
     irq_restore(irq_state);
     return WAIT_OK;
 }
@@ -114,6 +123,7 @@ int mutex_trylock(mutex_t *mutex)
     }
 
     mutex->owner = tid;
+    trace_emit(TRACE_MUTEX_LOCK, tid, THREAD_INVALID_TID, 0);
     irq_restore(irq_state);
     return 1;
 }
@@ -133,6 +143,7 @@ void mutex_unlock(mutex_t *mutex)
 
     tid_t next_owner = wait_queue_wake_one(&mutex->waiters);
     mutex->owner = next_owner == THREAD_INVALID_TID ? MUTEX_NO_OWNER : next_owner;
+    trace_emit(TRACE_MUTEX_UNLOCK, tid, next_owner, 0);
 
     irq_restore(irq_state);
 }

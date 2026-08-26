@@ -12,16 +12,16 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[##########----------] 50%`
+Progress: `[###########---------] 55%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
 round-robin kernel threads using trap-frame-based switching. It also supports
 tick-based `thread_sleep()` through an absolute-deadline sleep queue and
 event-style blocking through wait queues. It now includes non-recursive kernel
-mutexes with FIFO owner transfer and timeout-aware blocking. Memory management,
-userspace isolation, syscalls, and the simulated accelerator driver remain
-future milestones.
+mutexes with FIFO owner transfer, timeout-aware blocking, and structured
+scheduler tracing. Memory management, userspace isolation, syscalls, and the
+simulated accelerator driver remain future milestones.
 
 ## Project Goals
 
@@ -96,12 +96,12 @@ Kernel thread scheduling setup is complete:
 - FIFO wait queues for event-style blocking and wakeups
 - non-recursive kernel mutexes built on wait queues
 - timeout-aware waits and `mutex_lock_timeout()`
+- structured in-memory scheduler traces with explicit UART dump
 - `thread_exit()` for retiring finished threads
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Scheduler tracing and priority-inversion experiments are the next scheduling
-milestones.
+Priority-inversion experiments are the next scheduling milestone.
 
 Expected boot output:
 
@@ -125,7 +125,11 @@ thread: mutex-b timed out
 thread: mutex-a unlocking
 thread: mutex-c locking
 thread: mutex-c acquired
-milestone 9: timed waits
+milestone 10: scheduler tracing
+trace: begin count=... overwrites=...
+trace: seq=... tick=... type=context_switch tid=... other=... arg0=...
+trace: ...
+trace: end
 ```
 
 ## Planned Architecture
@@ -235,15 +239,23 @@ make clean
 make toolcheck
 ```
 
+Tracing is compiled in by default. Build without tracing:
+
+```sh
+make clean
+make CONFIG_TRACE=0
+```
+
 ## Testing Strategy
 
 The project will favor repeatable tests over manual observation. The first test
 is a black-box QEMU integration test that validates the latest milestone through
-the kernel's UART output. It currently checks timeout-aware mutex blocking
-without requiring an in-kernel unit-test framework. The current test verifies
-that one thread times out while waiting for a mutex, the idle task runs while
-all real threads are blocked, and a later thread can still acquire the mutex
-after the owner unlocks.
+the kernel's UART output. It currently checks timeout-aware mutex blocking and
+selected scheduler trace events without requiring an in-kernel unit-test
+framework. The current test verifies that one thread times out while waiting for
+a mutex, the idle task runs while all real threads are blocked, a later thread
+can still acquire the mutex after the owner unlocks, and the trace dump includes
+key events such as context switches, idle entry, wait timeout, and mutex timeout.
 
 Planned test categories:
 

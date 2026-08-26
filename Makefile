@@ -10,6 +10,7 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
+CONFIG_TRACE ?= 1
 
 BUILD_DIR := build
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
@@ -19,6 +20,7 @@ KERNEL_MAP := $(BUILD_DIR)/kernel.map
 ARCH_CFLAGS := -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany
 COMMON_CFLAGS := -ffreestanding -fno-common -fno-builtin -fno-stack-protector
 COMMON_CFLAGS += -Wall -Wextra -Werror -O2 -g
+COMMON_CFLAGS += -DCONFIG_TRACE=$(CONFIG_TRACE)
 CFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Ikernel
 ASFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Ikernel
 LDFLAGS := -T linker.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(KERNEL_MAP)
@@ -31,6 +33,7 @@ KERNEL_SRCS := \
 	kernel/core/panic.c \
 	kernel/core/sync.c \
 	kernel/core/thread.c \
+	kernel/core/trace.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \
 	kernel/drivers/uart.c
