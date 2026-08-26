@@ -34,6 +34,7 @@ KERNEL_SRCS := \
 	kernel/core/sync.c \
 	kernel/core/thread.c \
 	kernel/core/trace.c \
+	kernel/memory/page_alloc.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \
 	kernel/drivers/uart.c

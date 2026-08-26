@@ -7,6 +7,7 @@ import time
 
 
 EXPECTED_SEQUENCE = [
+    "milestone 11: physical page allocator",
     "thread: mutex-a locking",
     "thread: mutex-a acquired",
     "thread: mutex-b timed wait",
@@ -31,6 +32,7 @@ TIMEOUT_SECONDS = 10.0
 def is_relevant_line(line: str) -> bool:
     return (
         line.startswith("thread: mutex-")
+        or line.startswith("milestone 11:")
         or line.startswith("milestone 10:")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
@@ -129,7 +131,10 @@ def main() -> int:
                                 print("".join(output), file=sys.stderr)
                                 return 1
 
-                            print("qemu smoke test: observed scheduler trace sequence")
+                            print(
+                                "qemu smoke test: observed physical page allocator "
+                                "and scheduler trace sequence"
+                            )
                             return 0
 
             if proc.poll() is not None:
