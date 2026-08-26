@@ -114,20 +114,34 @@ oldest waiter.
 
 ## Priority Inversion
 
-Owner transfer does not solve priority inversion. Priority inversion happens
-while a high-priority thread is blocked behind a lower-priority owner. Owner
-transfer only controls which waiter receives the mutex after unlock.
+Owner transfer does not solve priority inversion. In a priority scheduler,
+priority inversion happens while a high-priority thread is blocked behind a
+lower-priority mutex owner and medium-priority work prevents that owner from
+running.
+
+The current kernel cannot demonstrate that scenario honestly because the
+scheduler is preemptive FIFO round-robin and has no priority model. Threads can
+be named high, medium, and low, but the scheduler would not treat those names as
+scheduling policy.
 
 The explicit owner field is still useful for future priority inheritance: the
 kernel can identify which owner should be boosted while higher-priority waiters
 exist, then restore or recompute priority on unlock.
 
+Before priority-inversion experiments are implemented, the kernel needs:
+
+- thread base and effective priorities
+- priority-aware ready selection
+- scheduler-aware mutex waiter selection
+- a priority inheritance or priority ceiling policy
+
 ## Future Work
 
 - Add owner-death checks or per-thread owned-mutex tracking.
-- Replace FIFO waiter selection with scheduler-aware selection if priorities,
-  EDF, or MLFQ are introduced.
-- Add priority-inheritance experiments once thread priorities exist.
+- Replace FIFO waiter selection with scheduler-aware selection if priority
+  scheduling, EDF, or MLFQ is introduced.
+- Add priority-inversion and priority-inheritance experiments once thread
+  priorities exist.
 
 ## Test Evidence
 

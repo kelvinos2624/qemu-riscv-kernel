@@ -130,6 +130,11 @@ The scheduler uses FIFO round-robin over a bounded ready queue. The queue
 contains real runnable threads only. TID 0, the null task, is never enqueued and
 is selected only when the ready queue is empty.
 
+There is no thread priority model in this scheduler. All real runnable threads
+share the same scheduling class, and fairness is based on ready-queue order plus
+timer preemption. Because priorities do not exist yet, priority inversion is not
+currently expressible as a runtime scheduler behavior.
+
 Queue semantics:
 
 - `thread_create()` marks a new real thread `THREAD_READY` and appends it to the
@@ -295,4 +300,6 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add priority-inversion experiments.
+- Move to virtual memory and allocation.
+- Add priority scheduling as a future scheduling extension if priority-inversion
+  experiments become a goal.
