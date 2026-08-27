@@ -2,6 +2,7 @@
 #include "core/scenario.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
+#include "memory/heap.h"
 #include "memory/page_alloc.h"
 
 extern char __kernel_start[];
@@ -36,5 +37,6 @@ void kmain(void)
     console_write("milestone 2: timer interrupt setup\n");
 
     page_init((uintptr_t)__kernel_end, (uintptr_t)__ram_end);
+    heap_init();
     scenario_run();
 }
