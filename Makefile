@@ -20,7 +20,8 @@ ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
 endif
 
-BUILD_DIR := build/$(SCENARIO)
+BUILD_ROOT := build
+BUILD_DIR := $(BUILD_ROOT)/$(SCENARIO)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 KERNEL_MAP := $(BUILD_DIR)/kernel.map
@@ -101,6 +102,6 @@ $(BUILD_DIR)/%.o: %.S
 	$(CC) $(ASFLAGS) -MMD -MP -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_ROOT)
 
 -include $(DEPS)
