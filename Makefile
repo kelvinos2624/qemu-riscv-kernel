@@ -11,10 +11,10 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator scheduler-sync
+SCENARIOS := allocator heap scheduler-sync
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter scheduler-sync,$(SCENARIO)),2,))
+CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter scheduler-sync,$(SCENARIO)),3,)))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
@@ -45,6 +45,7 @@ KERNEL_SRCS := \
 	kernel/core/sync.c \
 	kernel/core/thread.c \
 	kernel/core/trace.c \
+	kernel/memory/heap.c \
 	kernel/memory/page_alloc.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \

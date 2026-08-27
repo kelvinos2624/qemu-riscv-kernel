@@ -3,6 +3,7 @@
 #include "core/sync.h"
 #include "core/thread.h"
 #include "core/trace.h"
+#include "memory/heap.h"
 #include "memory/page_alloc.h"
 
 #ifndef CONFIG_SCENARIO
@@ -14,11 +15,17 @@ static volatile int demo_shared_counter;
 
 static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
+static void scenario_heap(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 
 static int page_is_aligned(const void *page)
 {
     return (((uintptr_t)page & PAGE_MASK) == 0);
+}
+
+static int pointer_is_aligned(const void *ptr, uintptr_t alignment)
+{
+    return (((uintptr_t)ptr & (alignment - 1u)) == 0);
 }
 
 static void scenario_idle_forever(void)
@@ -103,6 +110,114 @@ static void scenario_allocator(void)
     scenario_idle_forever();
 }
 
+static void scenario_heap(void)
+{
+    console_write("scenario: heap\n");
+
+    if (heap_page_count() != 0 ||
+        heap_free_bytes() != 0 ||
+        heap_allocated_bytes() != 0) {
+        PANIC("heap not lazy after init");
+    }
+
+    void *small = kmalloc(1);
+    if (small == NULL || !pointer_is_aligned(small, 16)) {
+        PANIC("heap small allocation failed");
+    }
+    if (heap_page_count() != 1 || heap_allocated_bytes() != 32) {
+        PANIC("heap small allocation stats mismatch");
+    }
+
+    kfree(small);
+    if (heap_allocated_bytes() != 0) {
+        PANIC("heap free stats mismatch");
+    }
+
+    void *reused = kmalloc(1);
+    if (reused != small) {
+        PANIC("heap did not reuse freed block");
+    }
+    kfree(reused);
+
+    uint8_t *dirty = kmalloc(33);
+    if (dirty == NULL || !pointer_is_aligned(dirty, 16)) {
+        PANIC("heap 64-byte class allocation failed");
+    }
+    for (size_t i = 0; i < 64; i++) {
+        dirty[i] = 0xa5u;
+    }
+    kfree(dirty);
+
+    uint8_t *zeroed = kzalloc(33);
+    if (zeroed != dirty) {
+        PANIC("heap did not reuse dirty 64-byte block");
+    }
+    for (size_t i = 0; i < 64; i++) {
+        if (zeroed[i] != 0) {
+            PANIC("kzalloc did not zero entire block");
+        }
+    }
+    kfree(zeroed);
+
+    const size_t class_sizes[] = {
+        32u,
+        64u,
+        128u,
+        256u,
+        512u,
+        1024u,
+        2048u,
+    };
+    void *class_blocks[sizeof(class_sizes) / sizeof(class_sizes[0])];
+    for (size_t i = 0; i < sizeof(class_sizes) / sizeof(class_sizes[0]); i++) {
+        class_blocks[i] = kmalloc(class_sizes[i]);
+        if (class_blocks[i] == NULL ||
+            !pointer_is_aligned(class_blocks[i], 16)) {
+            PANIC("heap class allocation failed");
+        }
+    }
+    if (heap_page_count() != sizeof(class_sizes) / sizeof(class_sizes[0])) {
+        PANIC("heap lazy class growth mismatch");
+    }
+    for (size_t i = 0; i < sizeof(class_sizes) / sizeof(class_sizes[0]); i++) {
+        kfree(class_blocks[i]);
+    }
+
+    const size_t pages_before_growth = heap_page_count();
+    void *growth_blocks[130];
+    size_t growth_count = 0;
+    for (; growth_count < sizeof(growth_blocks) / sizeof(growth_blocks[0]);
+         growth_count++) {
+        growth_blocks[growth_count] = kmalloc(1);
+        if (growth_blocks[growth_count] == NULL) {
+            PANIC("heap growth allocation failed");
+        }
+    }
+    if (heap_page_count() <= pages_before_growth) {
+        PANIC("heap did not grow exhausted size class");
+    }
+    for (size_t i = 0; i < growth_count; i++) {
+        kfree(growth_blocks[i]);
+    }
+
+    if (kmalloc(2049) != NULL) {
+        PANIC("heap oversized allocation succeeded");
+    }
+
+    kfree(NULL);
+
+    console_write("heap: pages=");
+    console_write_hex64(heap_page_count());
+    console_write(" free=");
+    console_write_hex64(heap_free_bytes());
+    console_write(" allocated=");
+    console_write_hex64(heap_allocated_bytes());
+    console_write("\n");
+    console_write("milestone 12: kernel heap\n");
+
+    scenario_idle_forever();
+}
+
 static void demo_thread_a(void *arg)
 {
     (void)arg;
@@ -167,6 +282,10 @@ void scenario_run(void)
 {
     if (CONFIG_SCENARIO == SCENARIO_ALLOCATOR) {
         scenario_allocator();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_HEAP) {
+        scenario_heap();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {
