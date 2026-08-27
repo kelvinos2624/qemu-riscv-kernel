@@ -6,32 +6,46 @@ import sys
 import time
 
 
-EXPECTED_SEQUENCE = [
-    "milestone 11: physical page allocator",
-    "thread: mutex-a locking",
-    "thread: mutex-a acquired",
-    "thread: mutex-b timed wait",
-    "thread: null idle",
-    "thread: mutex-b timed out",
-    "thread: mutex-a unlocking",
-    "thread: mutex-c locking",
-    "thread: mutex-c acquired",
-    "milestone 10: scheduler tracing",
-    "trace: begin",
-    "trace: end",
-]
-REQUIRED_TRACE_TYPES = [
-    "context_switch",
-    "wait_timeout",
-    "mutex_timeout",
-    "idle",
-]
-TIMEOUT_SECONDS = 10.0
+SCENARIOS = {
+    "allocator": {
+        "expected_sequence": [
+            "scenario: allocator",
+            "milestone 11: physical page allocator",
+        ],
+        "required_trace_types": [],
+        "success": "physical page allocator scenario",
+    },
+    "scheduler-sync": {
+        "expected_sequence": [
+            "scenario: scheduler-sync",
+            "thread: mutex-a locking",
+            "thread: mutex-a acquired",
+            "thread: mutex-b timed wait",
+            "thread: null idle",
+            "thread: mutex-b timed out",
+            "thread: mutex-a unlocking",
+            "thread: mutex-c locking",
+            "thread: mutex-c acquired",
+            "milestone 10: scheduler tracing",
+            "trace: begin",
+            "trace: end",
+        ],
+        "required_trace_types": [
+            "context_switch",
+            "wait_timeout",
+            "mutex_timeout",
+            "idle",
+        ],
+        "success": "scheduler synchronization scenario",
+    },
+}
+TIMEOUT_SECONDS = 15.0
 
 
 def is_relevant_line(line: str) -> bool:
     return (
-        line.startswith("thread: mutex-")
+        line.startswith("scenario:")
+        or line.startswith("thread: mutex-")
         or line.startswith("milestone 11:")
         or line.startswith("milestone 10:")
         or line.startswith("trace:")
@@ -40,12 +54,25 @@ def is_relevant_line(line: str) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: qemu_smoke_test.py <qemu-system-riscv64> <kernel.elf>", file=sys.stderr)
+    if len(sys.argv) != 4:
+        print(
+            "usage: qemu_smoke_test.py <qemu-system-riscv64> <kernel.elf> <scenario>",
+            file=sys.stderr,
+        )
+        print(f"scenarios: {', '.join(sorted(SCENARIOS))}", file=sys.stderr)
         return 2
 
     qemu = sys.argv[1]
     kernel = sys.argv[2]
+    scenario = sys.argv[3]
+    scenario_config = SCENARIOS.get(scenario)
+    if scenario_config is None:
+        print(f"unknown scenario: {scenario}", file=sys.stderr)
+        print(f"scenarios: {', '.join(sorted(SCENARIOS))}", file=sys.stderr)
+        return 2
+
+    expected_sequence = scenario_config["expected_sequence"]
+    required_trace_types = scenario_config["required_trace_types"]
     cmd = [
         qemu,
         "-machine",
@@ -101,22 +128,26 @@ def main() -> int:
                                 sequence_line = stripped_line
 
                             observed_sequence.append(stripped_line)
-                            if sequence_line != EXPECTED_SEQUENCE[expected_index]:
+                            if sequence_line != expected_sequence[expected_index]:
                                 print(
-                                    "qemu smoke test: scheduler sequence mismatch",
+                                    "qemu smoke test: scenario sequence mismatch",
                                     file=sys.stderr,
                                 )
                                 print(
-                                    f"expected: {EXPECTED_SEQUENCE[expected_index]}",
+                                    f"scenario: {scenario}",
+                                    file=sys.stderr,
+                                )
+                                print(
+                                    f"expected: {expected_sequence[expected_index]}",
                                     file=sys.stderr,
                                 )
                                 print(f"observed: {stripped_line}", file=sys.stderr)
                                 print("".join(output), file=sys.stderr)
                                 return 1
                             expected_index += 1
-                        if expected_index == len(EXPECTED_SEQUENCE):
+                        if expected_index == len(expected_sequence):
                             missing_trace_types = [
-                                trace_type for trace_type in REQUIRED_TRACE_TYPES
+                                trace_type for trace_type in required_trace_types
                                 if trace_type not in observed_trace_types
                             ]
                             if missing_trace_types:
@@ -132,8 +163,7 @@ def main() -> int:
                                 return 1
 
                             print(
-                                "qemu smoke test: observed physical page allocator "
-                                "and scheduler trace sequence"
+                                f"qemu smoke test: observed {scenario_config['success']}"
                             )
                             return 0
 
@@ -148,9 +178,10 @@ def main() -> int:
                 proc.kill()
                 proc.wait(timeout=1)
 
-    print("qemu smoke test: did not observe scheduler trace sequence", file=sys.stderr)
+    print("qemu smoke test: did not observe scenario sequence", file=sys.stderr)
+    print(f"scenario: {scenario}", file=sys.stderr)
     print(
-        f"next expected: {EXPECTED_SEQUENCE[expected_index]}",
+        f"next expected: {expected_sequence[expected_index]}",
         file=sys.stderr,
     )
     print(f"observed sequence: {observed_sequence}", file=sys.stderr)
