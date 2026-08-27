@@ -120,7 +120,7 @@ Virtual memory and allocation setup has begun:
 The next memory milestones are kernel heap support, page-table primitives,
 kernel paging, page-fault diagnostics, userspace mappings, and safe usercopy.
 
-Expected boot output:
+Common boot output:
 
 ```text
 qemu-rtos: booting RISC-V kernel
@@ -132,8 +132,20 @@ milestone 2: trap vector setup
 timer: interval=...
 timer: observed ... ticks
 milestone 2: timer interrupt setup
+```
+
+Allocator scenario output:
+
+```text
+scenario: allocator
 page: managed_start=... managed_end=... total=...
 milestone 11: physical page allocator
+```
+
+Scheduler/synchronization scenario output:
+
+```text
+scenario: scheduler-sync
 thread: initialized static table, null tid=0
 thread: starting scheduler
 thread: mutex-a locking
@@ -227,7 +239,8 @@ round-robin scheduling would be technically misleading.
 |-- kernel/
 |   |-- arch/riscv64/
 |   |-- core/
-|   `-- drivers/
+|   |-- drivers/
+|   `-- memory/
 |-- tools/
 `-- user/
 ```
@@ -253,16 +266,25 @@ Build the kernel:
 make
 ```
 
+The default build uses `SCENARIO=scheduler-sync`.
+
 Run it in QEMU:
 
 ```sh
 make run
 ```
 
-Run the current QEMU smoke test:
+Run all current QEMU smoke-test scenarios:
 
 ```sh
 make test
+```
+
+Run one scenario:
+
+```sh
+make test SCENARIO=allocator
+make test SCENARIO=scheduler-sync
 ```
 
 Useful targets:
@@ -271,6 +293,7 @@ Useful targets:
 make run
 make debug
 make test
+make test SCENARIO=allocator
 make clean
 make toolcheck
 ```
@@ -284,16 +307,25 @@ make CONFIG_TRACE=0
 
 ## Testing Strategy
 
-The project will favor repeatable tests over manual observation. The first test
-is a black-box QEMU integration test that validates the latest milestone through
-the kernel's UART output. It currently checks the physical page allocator
-self-test milestone, timeout-aware mutex blocking, and selected scheduler trace
-events without requiring an in-kernel unit-test framework. The current test
-verifies that the allocator initializes and survives its boot self-test, one
-thread times out while waiting for a mutex, the idle task runs while all real
-threads are blocked, a later thread can still acquire the mutex after the owner
-unlocks, and the trace dump includes key events such as context switches, idle
-entry, wait timeout, and mutex timeout.
+The project favors repeatable tests over manual observation. The first test is a
+black-box QEMU integration test that validates scenario-specific milestones
+through the kernel's UART output.
+
+Scenarios split common kernel bring-up from focused test workloads. This keeps
+future heap, page-table, user-mode, and driver tests from growing into one
+fragile scripted boot path.
+
+The current scenarios are:
+
+- `allocator`: validates the physical page allocator self-test milestone
+- `scheduler-sync`: validates timeout-aware mutex blocking and selected
+  scheduler trace events
+
+The current tests verify that the allocator initializes and survives its boot
+self-test, one thread times out while waiting for a mutex, the idle task runs
+while all real threads are blocked, a later thread can still acquire the mutex
+after the owner unlocks, and the trace dump includes key events such as context
+switches, idle entry, wait timeout, and mutex timeout.
 
 Planned test categories:
 
