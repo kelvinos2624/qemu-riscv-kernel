@@ -28,6 +28,46 @@ static void trap_print_field(const char *name, uint64_t value)
     console_write(" ");
 }
 
+static int trap_is_page_fault(uint64_t cause)
+{
+    return cause == MCAUSE_INSTRUCTION_PAGE_FAULT ||
+           cause == MCAUSE_LOAD_PAGE_FAULT ||
+           cause == MCAUSE_STORE_PAGE_FAULT;
+}
+
+static const char *trap_page_fault_access(uint64_t cause)
+{
+    if (cause == MCAUSE_INSTRUCTION_PAGE_FAULT) {
+        return "instruction";
+    }
+
+    if (cause == MCAUSE_LOAD_PAGE_FAULT) {
+        return "load";
+    }
+
+    if (cause == MCAUSE_STORE_PAGE_FAULT) {
+        return "store";
+    }
+
+    return "unknown";
+}
+
+static void trap_report_page_fault(trap_frame_t *frame, uint64_t cause)
+{
+    console_write("\ntrap: page fault access=");
+    console_write(trap_page_fault_access(cause));
+    console_write(" ");
+    trap_print_field("scause", frame->mcause);
+    trap_print_field("sepc", frame->mepc);
+    trap_print_field("stval", frame->mtval);
+    trap_print_field("sstatus", frame->mstatus);
+    trap_print_field("satp", csr_read_satp());
+    trap_print_field("tid", thread_current_tid());
+    console_write("\n");
+
+    PANIC("page fault");
+}
+
 void trap_init(void)
 {
     csr_write_stvec((uint64_t)(uintptr_t)trap_entry);
@@ -68,6 +108,10 @@ trap_frame_t *trap_handle(trap_frame_t *frame)
     if (is_interrupt && cause == SCAUSE_SUPERVISOR_TIMER_INTERRUPT) {
         timer_handle_interrupt();
         return thread_maybe_preempt_from_trap(frame);
+    }
+
+    if (!is_interrupt && trap_is_page_fault(cause)) {
+        trap_report_page_fault(frame, cause);
     }
 
     console_write("\ntrap: unhandled ");

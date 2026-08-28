@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[################----] 80%`
+Progress: `[#################---] 85%`
 
 The kernel currently boots on QEMU `virt` with `-bios none`, builds an
 identity-mapped Sv39 kernel page table, enters S-mode, initializes UART output,
@@ -23,8 +23,9 @@ absolute-deadline sleep queue and event-style blocking through wait queues. It
 now includes non-recursive kernel mutexes with FIFO owner transfer,
 timeout-aware blocking, structured scheduler tracing, a bitmap physical page
 allocator, a page-backed size-class kernel heap, Sv39 page-table primitives,
-and hardware kernel paging. Page faults, userspace isolation, syscalls, and the
-simulated accelerator driver remain future milestones.
+hardware kernel paging, and diagnostic S-mode page-fault handling. Recoverable
+page faults, userspace isolation, syscalls, and the simulated accelerator driver
+remain future milestones.
 
 ## Project Goals
 
@@ -133,9 +134,14 @@ Virtual memory and allocation setup has begun:
 - S-mode kernel execution under Sv39
 - linker-section permissions for text, rodata, writable kernel memory, and MMIO
 - policy-free M-mode shim boundary documented for timer delivery
+- instruction/load/store page-fault decoding in the S-mode trap path
+- fatal page-fault diagnostics with `scause`, `sepc`, `stval`, `sstatus`,
+  `satp`, and current TID
+- dedicated unmapped-load page-fault smoke scenario
+- documented deferral of recoverable fault probes until safe usercopy
 
-The next memory milestones are page-fault diagnostics, userspace mappings,
-address-space teardown, and safe usercopy.
+The next memory milestones are userspace mappings, address-space teardown, and
+safe usercopy with recoverable fault probes.
 
 Common boot output:
 
@@ -175,6 +181,13 @@ VM scenario output:
 scenario: vm
 vm: root=... free_pages=...
 milestone 13: sv39 page table primitives
+```
+
+Page-fault scenario output:
+
+```text
+scenario: page-fault
+trap: page fault access=load scause=... sepc=... stval=... sstatus=... satp=... tid=...
 ```
 
 Scheduler/synchronization scenario output:
@@ -321,6 +334,7 @@ Run one scenario:
 make test SCENARIO=allocator
 make test SCENARIO=heap
 make test SCENARIO=vm
+make test SCENARIO=page-fault
 make test SCENARIO=scheduler-sync
 ```
 
@@ -333,6 +347,7 @@ make test
 make test SCENARIO=allocator
 make test SCENARIO=heap
 make test SCENARIO=vm
+make test SCENARIO=page-fault
 make clean
 make toolcheck
 ```
@@ -360,17 +375,19 @@ The current scenarios are:
 - `heap`: validates the kernel heap self-test milestone
 - `vm`: validates Sv39 page-table primitives in a separate software-managed
   address space
+- `page-fault`: validates fatal S-mode page-fault diagnostics for an unmapped
+  load
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
 VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
-the common boot path reaches S-mode with Sv39 enabled, one thread times out
-while waiting for a mutex, the idle task runs while all real threads are
-blocked, a later thread can still acquire the mutex after the owner unlocks,
-and the trace dump includes key events such as context switches, idle entry,
-wait timeout, and mutex timeout.
+the common boot path reaches S-mode with Sv39 enabled, an unmapped load produces
+a load page-fault diagnostic, one thread times out while waiting for a mutex,
+the idle task runs while all real threads are blocked, a later thread can still
+acquire the mutex after the owner unlocks, and the trace dump includes key
+events such as context switches, idle entry, wait timeout, and mutex timeout.
 
 Planned test categories:
 

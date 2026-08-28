@@ -11,10 +11,10 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm scheduler-sync
+SCENARIOS := allocator heap vm page-fault scheduler-sync
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter scheduler-sync,$(SCENARIO)),4,))))
+CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter scheduler-sync,$(SCENARIO)),5,)))))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
