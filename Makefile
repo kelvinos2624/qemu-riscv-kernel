@@ -11,10 +11,10 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap scheduler-sync
+SCENARIOS := allocator heap vm scheduler-sync
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter scheduler-sync,$(SCENARIO)),3,)))
+CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter scheduler-sync,$(SCENARIO)),4,))))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
@@ -25,6 +25,7 @@ BUILD_DIR := $(BUILD_ROOT)/$(SCENARIO)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 KERNEL_MAP := $(BUILD_DIR)/kernel.map
+CONFIG_STAMP := $(BUILD_DIR)/.config.stamp
 
 ARCH_CFLAGS := -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany
 COMMON_CFLAGS := -ffreestanding -fno-common -fno-builtin -fno-stack-protector
@@ -47,6 +48,7 @@ KERNEL_SRCS := \
 	kernel/core/trace.c \
 	kernel/memory/heap.c \
 	kernel/memory/page_alloc.c \
+	kernel/memory/vm.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \
 	kernel/drivers/uart.c
@@ -55,7 +57,7 @@ KERNEL_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(KERNEL_SRCS)))
 KERNEL_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(KERNEL_SRCS)))
 DEPS := $(KERNEL_OBJS:.o=.d)
 
-.PHONY: all run debug test test-all test-one boot-test clean toolcheck
+.PHONY: all run debug test test-all test-one boot-test clean toolcheck FORCE
 
 all: $(KERNEL_ELF) $(KERNEL_BIN)
 
@@ -94,11 +96,22 @@ $(KERNEL_ELF): $(KERNEL_OBJS) linker.ld
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
-$(BUILD_DIR)/%.o: %.c
+$(CONFIG_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@{ \
+		printf 'CONFIG_TRACE=%s\n' '$(CONFIG_TRACE)'; \
+		printf 'CONFIG_SCENARIO_ID=%s\n' '$(CONFIG_SCENARIO_ID)'; \
+		printf 'CFLAGS=%s\n' '$(CFLAGS)'; \
+		printf 'ASFLAGS=%s\n' '$(ASFLAGS)'; \
+	} > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+
+$(BUILD_DIR)/%.o: %.c $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/%.o: %.S
+$(BUILD_DIR)/%.o: %.S $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -MMD -MP -c $< -o $@
 

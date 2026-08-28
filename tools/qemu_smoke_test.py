@@ -23,6 +23,14 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "kernel heap scenario",
     },
+    "vm": {
+        "expected_sequence": [
+            "scenario: vm",
+            "milestone 13: sv39 page table primitives",
+        ],
+        "required_trace_types": [],
+        "success": "sv39 page table primitives scenario",
+    },
     "scheduler-sync": {
         "expected_sequence": [
             "scenario: scheduler-sync",
@@ -56,6 +64,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("thread: mutex-")
         or line.startswith("milestone 11:")
         or line.startswith("milestone 12:")
+        or line.startswith("milestone 13:")
         or line.startswith("milestone 10:")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
