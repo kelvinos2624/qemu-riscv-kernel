@@ -204,6 +204,11 @@ the first VM primitive small and avoids recursive subtree accounting before
 there is real address-space teardown or memory pressure. A future address-space
 destroy path can reclaim page-table pages with a post-order walk.
 
+Failed `vm_map_page()` calls are not allowed to retain newly allocated
+intermediate page-table pages. If a sparse mapping allocates part of a fresh
+branch and then runs out of physical pages, the walker clears the PTEs it
+installed during that call and returns those pages to `page_alloc()`.
+
 ## STM32 RTOS Connection
 
 The STM32 RTOS lab path favors bounded kernel-owned structures and predictable
@@ -256,6 +261,7 @@ The VM scenario verifies:
 - duplicate mapping rejection
 - unmap and duplicate-unmap behavior
 - sparse virtual-address mappings that require separate page-table branches
+- rollback of partially allocated page-table branches on `VM_ERR_NO_MEMORY`
 - invalid alignment, invalid flags, and non-canonical virtual-address rejection
 
 The QEMU smoke test checks for:

@@ -90,6 +90,19 @@ static int flags_are_valid(uint64_t flags)
     return 1;
 }
 
+static void rollback_allocated_tables(
+    pte_t **allocated_ptes,
+    pte_t **allocated_tables,
+    size_t allocated_count
+)
+{
+    while (allocated_count > 0) {
+        allocated_count--;
+        *allocated_ptes[allocated_count] = 0;
+        page_free(allocated_tables[allocated_count]);
+    }
+}
+
 int vm_space_init(vm_space_t *space)
 {
     if (space == NULL) {
@@ -117,6 +130,10 @@ static pte_t *vm_walk(const vm_space_t *space, uintptr_t va, int alloc)
         return NULL;
     }
 
+    pte_t *allocated_ptes[SV39_LEVELS - 1u];
+    pte_t *allocated_tables[SV39_LEVELS - 1u];
+    size_t allocated_count = 0;
+
     pte_t *table = space->root;
     for (int level = (int)SV39_LEVELS - 1; level > 0; level--) {
         pte_t *pte = &table[vpn_index(va, (unsigned int)level)];
@@ -135,11 +152,19 @@ static pte_t *vm_walk(const vm_space_t *space, uintptr_t va, int alloc)
 
         pte_t *next_table = page_alloc();
         if (next_table == NULL) {
+            rollback_allocated_tables(
+                allocated_ptes,
+                allocated_tables,
+                allocated_count
+            );
             return NULL;
         }
 
         memory_zero(next_table, PAGE_SIZE);
         *pte = pa_to_pte((uintptr_t)next_table, VM_PTE_V);
+        allocated_ptes[allocated_count] = pte;
+        allocated_tables[allocated_count] = next_table;
+        allocated_count++;
         table = next_table;
     }
 

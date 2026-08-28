@@ -40,6 +40,10 @@ state, install page-fault handling, or switch address spaces.
 intermediate page-table pages. That reclamation is deliberately deferred until
 the kernel has address-space teardown or a memory-pressure policy.
 
+Failed `vm_map_page()` calls roll back intermediate page-table pages allocated
+during that call. A map operation may return `VM_ERR_NO_MEMORY`, but it should
+not permanently consume page-table pages for a mapping it did not install.
+
 ## Rationale
 
 Building page tables before enabling paging creates a smaller testable unit.
@@ -55,6 +59,11 @@ requires knowing whether an intermediate page-table subtree is empty, walking
 back up the tree, and deciding how that interacts with future shared kernel
 mappings and address-space lifetime. There is no real memory-pressure signal
 yet, so the extra machinery would not pay for itself in this PR.
+
+Rollback on failed map is still worth doing because it is local to one
+operation. The walker knows exactly which branch PTEs it installed during the
+current call, so it can clear and free those pages without needing general
+address-space teardown.
 
 ## Alternatives Considered
 
@@ -86,6 +95,8 @@ the kernel has measurable mapping pressure.
 
 The VM layer consumes physical pages for root and intermediate page tables and
 does not currently return intermediate page-table pages after leaf unmaps.
+Mappings that fail before installing a leaf do return any intermediate pages
+allocated during that failed call.
 
 The API remains intentionally small. Callers can create an address space, map
 pages, unmap pages, and perform software translation, but the internal
@@ -110,7 +121,8 @@ kernel-owned memory explicit and failure behavior deterministic.
 The `vm` scenario verifies root allocation, page alignment, mapping,
 offset-preserving software translation, duplicate-map rejection, unmap and
 duplicate-unmap behavior, sparse address mappings, invalid alignment, invalid
-flags, and non-canonical virtual-address rejection.
+flags, non-canonical virtual-address rejection, and rollback when a sparse map
+runs out of physical pages after allocating part of a fresh page-table branch.
 
 The QEMU smoke test checks for:
 

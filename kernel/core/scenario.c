@@ -282,6 +282,42 @@ static void scenario_vm(void)
         PANIC("vm sparse translate failed");
     }
 
+    const size_t free_before_exhaustion = page_free_count();
+    void *held_pages = NULL;
+    while (page_free_count() > 1) {
+        void *page = page_alloc();
+        if (page == NULL) {
+            PANIC("vm exhaustion setup failed");
+        }
+
+        *(void **)page = held_pages;
+        held_pages = page;
+    }
+
+    const uintptr_t failing_va = 0x0000003000000000ull;
+    const size_t free_before_failed_map = page_free_count();
+    if (free_before_failed_map != 1) {
+        PANIC("vm failed-map setup mismatch");
+    }
+    if (vm_map_page(&space, failing_va, pa, rw_flags) != VM_ERR_NO_MEMORY) {
+        PANIC("vm failed sparse map did not report no memory");
+    }
+    if (page_free_count() != free_before_failed_map) {
+        PANIC("vm failed sparse map leaked page-table pages");
+    }
+    if (vm_translate(&space, failing_va) != VM_TRANSLATE_INVALID) {
+        PANIC("vm failed sparse map left a mapping");
+    }
+
+    while (held_pages != NULL) {
+        void *page = held_pages;
+        held_pages = *(void **)held_pages;
+        page_free(page);
+    }
+    if (page_free_count() != free_before_exhaustion) {
+        PANIC("vm exhaustion cleanup mismatch");
+    }
+
     if (vm_map_page(&space, va + 1u, pa, rw_flags) != VM_ERR_INVALID) {
         PANIC("vm accepted unaligned va");
     }
