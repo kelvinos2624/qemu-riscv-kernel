@@ -9,6 +9,7 @@ import time
 SCENARIOS = {
     "allocator": {
         "expected_sequence": [
+            "milestone 13: kernel paging",
             "scenario: allocator",
             "milestone 11: physical page allocator",
         ],
@@ -17,6 +18,7 @@ SCENARIOS = {
     },
     "heap": {
         "expected_sequence": [
+            "milestone 13: kernel paging",
             "scenario: heap",
             "milestone 12: kernel heap",
         ],
@@ -25,6 +27,7 @@ SCENARIOS = {
     },
     "vm": {
         "expected_sequence": [
+            "milestone 13: kernel paging",
             "scenario: vm",
             "milestone 13: sv39 page table primitives",
         ],
@@ -33,6 +36,7 @@ SCENARIOS = {
     },
     "scheduler-sync": {
         "expected_sequence": [
+            "milestone 13: kernel paging",
             "scenario: scheduler-sync",
             "thread: mutex-a locking",
             "thread: mutex-a acquired",

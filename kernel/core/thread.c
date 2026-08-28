@@ -5,11 +5,11 @@
 #include "core/trap.h"
 #include "drivers/timer.h"
 
-#define THREAD_ECALL_YIELD 1u
-#define THREAD_ECALL_EXIT 2u
-#define THREAD_ECALL_SLEEP 3u
-#define THREAD_ECALL_WAIT 4u
-#define THREAD_ECALL_WAIT_TIMEOUT 5u
+#define THREAD_TRAP_YIELD 1u
+#define THREAD_TRAP_EXIT 2u
+#define THREAD_TRAP_SLEEP 3u
+#define THREAD_TRAP_WAIT 4u
+#define THREAD_TRAP_WAIT_TIMEOUT 5u
 #define TRAP_FRAME_STACK_SIZE 288u
 
 typedef struct tid_queue {
@@ -588,7 +588,7 @@ static void prepare_initial_trap_frame(thread_t *thread)
 
     frame->sp = stack_top;
     frame->mepc = (uint64_t)(uintptr_t)thread_trampoline;
-    frame->mstatus = MSTATUS_MPP_M | MSTATUS_MPIE;
+    frame->mstatus = SSTATUS_SPP | SSTATUS_SPIE;
 
     thread->kernel_sp = frame->sp;
     thread->trap_frame = frame;
@@ -709,8 +709,8 @@ void thread_yield(void)
         return;
     }
 
-    register uint64_t op __asm__("a7") = THREAD_ECALL_YIELD;
-    __asm__ volatile("ecall" : : "r"(op) : "memory");
+    register uint64_t op __asm__("a7") = THREAD_TRAP_YIELD;
+    __asm__ volatile(".4byte 0x00100073" : : "r"(op) : "memory");
 }
 
 void thread_sleep(uint64_t ticks)
@@ -720,8 +720,8 @@ void thread_sleep(uint64_t ticks)
     }
 
     register uint64_t arg0 __asm__("a0") = ticks;
-    register uint64_t op __asm__("a7") = THREAD_ECALL_SLEEP;
-    __asm__ volatile("ecall" : : "r"(arg0), "r"(op) : "memory");
+    register uint64_t op __asm__("a7") = THREAD_TRAP_SLEEP;
+    __asm__ volatile(".4byte 0x00100073" : : "r"(arg0), "r"(op) : "memory");
 }
 
 void wait_queue_sleep(wait_queue_t *queue)
@@ -735,8 +735,8 @@ void wait_queue_sleep(wait_queue_t *queue)
     }
 
     register uintptr_t arg0 __asm__("a0") = (uintptr_t)queue;
-    register uint64_t op __asm__("a7") = THREAD_ECALL_WAIT;
-    __asm__ volatile("ecall" : : "r"(arg0), "r"(op) : "memory");
+    register uint64_t op __asm__("a7") = THREAD_TRAP_WAIT;
+    __asm__ volatile(".4byte 0x00100073" : : "r"(arg0), "r"(op) : "memory");
 }
 
 int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks)
@@ -755,15 +755,20 @@ int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks)
 
     register uintptr_t arg0 __asm__("a0") = (uintptr_t)queue;
     register uint64_t arg1 __asm__("a1") = ticks;
-    register uint64_t op __asm__("a7") = THREAD_ECALL_WAIT_TIMEOUT;
-    __asm__ volatile("ecall" : "+r"(arg0) : "r"(arg1), "r"(op) : "memory");
+    register uint64_t op __asm__("a7") = THREAD_TRAP_WAIT_TIMEOUT;
+    __asm__ volatile(
+        ".4byte 0x00100073"
+        : "+r"(arg0)
+        : "r"(arg1), "r"(op)
+        : "memory"
+    );
     return (int)(intptr_t)arg0;
 }
 
 void thread_exit(void)
 {
-    register uint64_t op __asm__("a7") = THREAD_ECALL_EXIT;
-    __asm__ volatile("ecall" : : "r"(op) : "memory");
+    register uint64_t op __asm__("a7") = THREAD_TRAP_EXIT;
+    __asm__ volatile(".4byte 0x00100073" : : "r"(op) : "memory");
 
     PANIC("thread_exit returned");
 }
@@ -990,7 +995,7 @@ static trap_frame_t *block_current_from_trap(
     return next_frame;
 }
 
-trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
+trap_frame_t *thread_handle_control_trap_from_trap(trap_frame_t *frame)
 {
     const uint64_t op = frame->a7;
     const uint64_t arg0 = frame->a0;
@@ -1001,7 +1006,7 @@ trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
         return frame;
     }
 
-    if (op == THREAD_ECALL_YIELD) {
+    if (op == THREAD_TRAP_YIELD) {
         if (current_thread == NULL) {
             return frame;
         }
@@ -1018,11 +1023,11 @@ trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
         return switch_to_next_from_trap(frame, 1);
     }
 
-    if (op == THREAD_ECALL_EXIT) {
+    if (op == THREAD_TRAP_EXIT) {
         return switch_to_next_from_trap(frame, 0);
     }
 
-    if (op == THREAD_ECALL_SLEEP) {
+    if (op == THREAD_TRAP_SLEEP) {
         if (current_thread == NULL) {
             return frame;
         }
@@ -1043,10 +1048,10 @@ trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
         return sleep_current_from_trap(frame, arg0);
     }
 
-    if (op == THREAD_ECALL_WAIT) {
+    if (op == THREAD_TRAP_WAIT) {
         wait_queue_t *queue = (wait_queue_t *)(uintptr_t)arg0;
         if (queue == NULL) {
-            PANIC("wait ecall null queue");
+            PANIC("wait control trap null queue");
         }
 
         if (current_thread == NULL) {
@@ -1060,11 +1065,11 @@ trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
         return block_current_from_trap(frame, queue, 0);
     }
 
-    if (op == THREAD_ECALL_WAIT_TIMEOUT) {
+    if (op == THREAD_TRAP_WAIT_TIMEOUT) {
         wait_queue_t *queue = (wait_queue_t *)(uintptr_t)arg0;
         const uint64_t ticks = frame->a1;
         if (queue == NULL) {
-            PANIC("timed wait ecall null queue");
+            PANIC("timed wait control trap null queue");
         }
 
         if (current_thread == NULL) {
@@ -1084,7 +1089,7 @@ trap_frame_t *thread_handle_ecall_from_trap(trap_frame_t *frame)
         return block_current_from_trap(frame, queue, ticks);
     }
 
-    PANIC("unknown thread ecall");
+    PANIC("unknown thread control trap");
 }
 
 trap_frame_t *thread_maybe_preempt_from_trap(trap_frame_t *frame)

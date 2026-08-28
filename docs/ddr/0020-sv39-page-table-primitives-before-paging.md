@@ -4,6 +4,9 @@
 
 Accepted
 
+Follow-up: DDR 21 enables Sv39 for normal S-mode kernel execution using the
+page-table primitives introduced here.
+
 ## Context
 
 The kernel now has a physical page allocator and a page-backed kernel heap.

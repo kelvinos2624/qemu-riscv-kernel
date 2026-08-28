@@ -12,21 +12,19 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[###############-----] 75%`
+Progress: `[################----] 80%`
 
-The kernel currently boots on QEMU `virt`, initializes UART output, installs a
-machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
-round-robin kernel threads using trap-frame-based switching. It also supports
-tick-based `thread_sleep()` through an absolute-deadline sleep queue and
-event-style blocking through wait queues. It now includes non-recursive kernel
-mutexes with FIFO owner transfer, timeout-aware blocking, and structured
-scheduler tracing. The scheduling and synchronization section is complete for
-the current round-robin scope; priority-inversion experiments are deferred until
-the kernel has a real priority scheduler. The virtual-memory and allocation
-section now includes a bitmap physical page allocator, a page-backed size-class
-kernel heap, and Sv39 page-table primitives. Hardware paging, page faults,
-userspace isolation, syscalls, and the simulated accelerator driver remain
-future milestones.
+The kernel currently boots on QEMU `virt` with `-bios none`, builds an
+identity-mapped Sv39 kernel page table, enters S-mode, initializes UART output,
+installs an S-mode trap path, handles reflected supervisor timer interrupts,
+and runs preemptive FIFO round-robin kernel threads using trap-frame-based
+switching. It also supports tick-based `thread_sleep()` through an
+absolute-deadline sleep queue and event-style blocking through wait queues. It
+now includes non-recursive kernel mutexes with FIFO owner transfer,
+timeout-aware blocking, structured scheduler tracing, a bitmap physical page
+allocator, a page-backed size-class kernel heap, Sv39 page-table primitives,
+and hardware kernel paging. Page faults, userspace isolation, syscalls, and the
+simulated accelerator driver remain future milestones.
 
 ## Project Goals
 
@@ -48,15 +46,15 @@ The project is designed to show practical understanding of:
 
 - Architecture: RISC-V 64-bit
 - Machine: QEMU `virt`
-- Initial privilege mode: machine mode
+- Initial privilege mode: machine mode bootstrap, supervisor mode kernel
 - ISA baseline: `rv64imac_zicsr`
 - Firmware: none, using QEMU `-bios none`
 - Kernel load address: `0x80000000`
 - Console: QEMU `virt` 16550 UART at `0x10000000`
 
-Machine mode is used for the first milestone to keep the earliest boot path
-fully owned by the kernel. Supervisor mode, SBI integration, page tables, and
-userspace isolation are later milestones.
+Machine mode is used as a minimal bootstrap and platform shim. Normal kernel
+execution runs in supervisor mode under an identity-mapped Sv39 page table.
+Userspace isolation remains a later milestone.
 
 ## Current Status
 
@@ -73,18 +71,22 @@ Milestone 1 is complete:
 
 Trap-vector setup is complete:
 
-- direct machine-mode trap vector
-- full trap frame for general-purpose registers and machine CSRs
-- C trap handler
-- controlled `ecall` self-test for trap return
+- minimal direct machine-mode trap vector for platform shim events
+- direct supervisor-mode trap vector for normal kernel traps
+- full trap frame for general-purpose registers and trap CSRs
+- C trap handlers
+- controlled fixed-width `ebreak` self-test for S-mode trap return
 
 Timer interrupt setup is complete:
 
 - QEMU `virt` machine timer MMIO
 - `mtimecmp` programming
+- bare-metal M-mode timer shim
+- S-mode absolute-deadline timer programming through machine `ecall`
+- machine-timer completion reflected as a supervisor timer interrupt
 - 1 ms kernel tick on the QEMU `virt` 10 MHz timebase
-- `mie.MTIE` and `mstatus.MIE` enablement
-- machine-timer interrupt dispatch through the trap handler
+- `mie.MTIE`, `mideleg.STIP`, `sie.STIE`, and `sstatus.SIE` enablement
+- S-mode timer interrupt dispatch through the trap handler
 - monotonic kernel tick counter
 
 Kernel thread scheduling setup is complete:
@@ -93,7 +95,7 @@ Kernel thread scheduling setup is complete:
 - reserved TID 0 null task
 - static per-thread kernel stacks
 - bounded FIFO ready queue over real thread IDs
-- machine-mode `ecall` path for `thread_yield()` and `thread_exit()`
+- S-mode fixed-width `ebreak` path for kernel thread control traps
 - timer-driven preemptive FIFO round-robin
 - trap-frame-based thread switching on trap return
 - queue membership tracking to support timeout-aware blocking
@@ -127,9 +129,13 @@ Virtual memory and allocation setup has begun:
 - 4 KiB page map, unmap, and software translation helpers
 - canonical virtual-address, alignment, duplicate-map, and permission checks
 - documented deferral of empty intermediate page-table reclamation
+- identity-mapped kernel page table installed in `satp`
+- S-mode kernel execution under Sv39
+- linker-section permissions for text, rodata, writable kernel memory, and MMIO
+- policy-free M-mode shim boundary documented for timer delivery
 
-The next memory milestones are kernel paging, page-fault diagnostics, userspace
-mappings, address-space teardown, and safe usercopy.
+The next memory milestones are page-fault diagnostics, userspace mappings,
+address-space teardown, and safe usercopy.
 
 Common boot output:
 
@@ -137,7 +143,9 @@ Common boot output:
 qemu-rtos: booting RISC-V kernel
 kernel_start=0x0000000080000000 kernel_end=... stack_top=...
 milestone 1: boot, stack, bss, uart console
-trap: mtvec=...
+paging: satp=...
+milestone 13: kernel paging
+trap: stvec=...
 trap: self-test passed
 milestone 2: trap vector setup
 timer: interval=...
@@ -350,17 +358,19 @@ The current scenarios are:
 
 - `allocator`: validates the physical page allocator self-test milestone
 - `heap`: validates the kernel heap self-test milestone
-- `vm`: validates Sv39 page-table primitives before hardware paging is enabled
+- `vm`: validates Sv39 page-table primitives in a separate software-managed
+  address space
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
 VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
-one thread times out while waiting for a mutex, the idle task runs while all
-real threads are blocked, a later thread can still acquire the mutex after the
-owner unlocks, and the trace dump includes key events such as context switches,
-idle entry, wait timeout, and mutex timeout.
+the common boot path reaches S-mode with Sv39 enabled, one thread times out
+while waiting for a mutex, the idle task runs while all real threads are
+blocked, a later thread can still acquire the mutex after the owner unlocks,
+and the trace dump includes key events such as context switches, idle entry,
+wait timeout, and mutex timeout.
 
 Planned test categories:
 

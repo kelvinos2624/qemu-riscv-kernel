@@ -9,28 +9,28 @@ typedef uint64_t irq_state_t;
 
 static inline irq_state_t irq_save(void)
 {
-    const irq_state_t state = csr_read_mstatus();
-    csr_clear_mstatus(MSTATUS_MIE);
+    const irq_state_t state = csr_read_sstatus();
+    csr_clear_sstatus(SSTATUS_SIE);
     return state;
 }
 
 static inline void irq_restore(irq_state_t state)
 {
-    if ((state & MSTATUS_MIE) != 0) {
-        csr_set_mstatus(MSTATUS_MIE);
+    if ((state & SSTATUS_SIE) != 0) {
+        csr_set_sstatus(SSTATUS_SIE);
     } else {
-        csr_clear_mstatus(MSTATUS_MIE);
+        csr_clear_sstatus(SSTATUS_SIE);
     }
 }
 
 static inline void irq_enable(void)
 {
-    csr_set_mstatus(MSTATUS_MIE);
+    csr_set_sstatus(SSTATUS_SIE);
 }
 
 static inline void irq_disable(void)
 {
-    csr_clear_mstatus(MSTATUS_MIE);
+    csr_clear_sstatus(SSTATUS_SIE);
 }
 
 #endif

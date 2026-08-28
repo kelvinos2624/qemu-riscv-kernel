@@ -4,6 +4,10 @@
 
 Accepted
 
+Follow-up: DDR 21 keeps the QEMU machine timer but moves scheduler policy into
+S-mode. M-mode now programs `mtimecmp` from an absolute deadline supplied by
+S-mode and reflects deadline completion as a supervisor timer interrupt.
+
 ## Context
 
 The kernel needs a periodic interrupt source before it can implement sleep,

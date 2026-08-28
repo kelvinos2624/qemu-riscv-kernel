@@ -2,27 +2,40 @@
 
 ## Scope
 
-Milestone 2 installs a machine-mode trap vector, saves a full general-purpose
-register frame, enters a C trap handler, and proves the path with a controlled
-machine-mode `ecall` self-test.
+The kernel now boots through a minimal machine-mode shim and runs normal kernel
+code in supervisor mode. M-mode handles only machine-owned platform mechanism.
+The S-mode kernel owns normal traps, timer accounting, scheduler policy, and
+future user/kernel boundaries.
 
-## Trap Mode
+## Trap Modes
 
-The kernel uses direct `mtvec` mode. All exceptions and interrupts enter the
-same assembly routine, `trap_entry`.
+M-mode uses direct `mtvec` with `machine_trap_entry`. This path is deliberately
+lean: it handles S-mode machine calls for timer programming and reflects
+machine-timer completion as a supervisor timer interrupt. It must not inspect or
+mutate scheduler queues, thread state, wait queues, mutex state, heap metadata,
+page allocator metadata, trace buffers, or address-space policy.
+
+S-mode uses direct `stvec` with `trap_entry`. Normal kernel traps enter the
+S-mode C trap handler, `trap_handle`, and return through `sret`.
 
 Direct mode is intentionally simple: it gives one path to debug before the
 kernel has many interrupt sources. Vectored mode can be introduced later if
 timer or external interrupt latency becomes important enough to measure.
 
-`trap_entry` is explicitly 4-byte aligned because `mtvec` stores the trap mode
-in the low two bits of the CSR value.
+Both trap entries are explicitly 4-byte aligned because `mtvec` and `stvec`
+store the trap mode in the low two bits of the CSR value.
 
 ## Trap Frame
 
-`trap_entry` saves all general-purpose registers except `x0`, plus `mepc`,
-`mstatus`, `mcause`, and `mtval`. It then passes a `trap_frame_t *` to
-`trap_handle`.
+The trap assembly saves all general-purpose registers except `x0`, plus the
+active trap CSRs. In S-mode, the saved CSR slots contain `sepc`, `sstatus`,
+`scause`, and `stval`. In M-mode, the same frame layout carries `mepc`,
+`mstatus`, `mcause`, and `mtval`.
+
+The C structure still uses the historical field names `mepc`, `mstatus`,
+`mcause`, and `mtval`, but after the S-mode transition those slots should be
+read as generic trap-frame `epc/status/cause/tval` fields. A future cleanup can
+rename them without changing the layout.
 
 The full frame costs more stores than a minimal exception-only frame, but it is
 a better foundation for later syscalls, context switching, and diagnostics.
@@ -31,20 +44,35 @@ assembly layout.
 
 ## Return Path
 
-After `trap_handle` returns, the assembly entry restores `mepc`, `mstatus`, and
-the saved general-purpose registers from the trap frame selected by C, then
-executes `mret`.
+After `trap_handle` returns, the S-mode assembly restore path writes `sepc` and
+`sstatus`, restores general-purpose registers from the selected frame, then
+executes `sret`.
 
 Most traps return the same frame they entered with. Timer preemption and
-machine-mode thread `ecall`s may return a different thread's saved frame. This
+kernel-thread control traps may return a different thread's saved frame. This
 keeps trap-frame selection in C while assembly remains responsible for the
 register restore mechanics.
 
-The self-test handles a deliberate machine-mode `ecall`, advances `mepc` by 4,
-and returns to the instruction after the `ecall`. Unexpected traps print CSR
-diagnostics and panic.
+The self-test handles a deliberate fixed-width `ebreak`, advances the saved EPC
+by 4, and returns to the instruction after the trap. The kernel uses fixed-width
+`ebreak` for internal thread-control traps because S-mode `ecall` is reserved
+for calls into the M-mode shim.
+
+Unexpected S-mode traps print CSR diagnostics and panic. Unexpected M-mode traps
+also panic, because the M-mode shim has no recovery policy of its own.
+
+## ECE350 and STM32 RTOS Connection
+
+This follows the ECE350 distinction between hardware traps and OS policy:
+hardware transfers control to a privileged handler, but the kernel decides what
+the event means.
+
+The timer/preemption path mirrors the STM32 RTOS SysTick/PendSV split. The
+timer creates a controlled scheduling point, while the actual context switch
+happens at trap return using a full saved context.
 
 ## Next Work
 
-- Add interrupt enable/disable helpers.
-- Replace the `ecall` self-test with syscall tests once userspace exists.
+- Add page-fault-specific diagnostics.
+- Replace the kernel-only control trap path with real user syscalls once U-mode
+  exists.

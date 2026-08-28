@@ -4,6 +4,11 @@
 
 Accepted
 
+Follow-up: DDR 21 migrates normal kernel execution to S-mode. Trap-frame-based
+switching remains the scheduler model, but kernel thread control traps now use
+fixed-width `ebreak` delegated to S-mode, and the restore path exits with
+`sret`.
+
 ## Context
 
 The kernel already had a machine timer interrupt and a FIFO ready queue.

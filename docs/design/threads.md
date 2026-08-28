@@ -2,16 +2,16 @@
 
 ## Scope
 
-This milestone adds machine-mode kernel threads with FIFO round-robin
-scheduling. The kernel can initialize a thread subsystem, create threads, start
-scheduling, voluntarily yield between threads, preempt CPU-bound threads from
-the timer interrupt path, put threads to sleep until a future tick, and retire
-exited threads. It also supports FIFO wait queues for blocking on kernel-owned
-events and timeout-aware event waits.
+This design covers S-mode kernel threads with FIFO round-robin scheduling. The
+kernel can initialize a thread subsystem, create threads, start scheduling,
+voluntarily yield between threads, preempt CPU-bound threads from the timer
+interrupt path, put threads to sleep until a future tick, and retire exited
+threads. It also supports FIFO wait queues for blocking on kernel-owned events
+and timeout-aware event waits.
 
-All threads in this milestone run in RISC-V machine mode. They are kernel
-threads, not user tasks: there is no address-space separation, user stack,
-`sret` path, page-table switch, or syscall boundary yet.
+All threads currently run as S-mode kernel threads under the shared identity
+kernel page table. They are not user tasks: there is no user stack, per-process
+page-table switch, or user syscall boundary yet.
 
 ## Public API
 
@@ -92,12 +92,12 @@ can win.
 
 ## Context Switching
 
-Thread switches now use trap-frame ownership. Each thread has a saved
-`trap_frame_t *` in its TCB. When a thread is interrupted, yields, or exits
-through the machine-mode `ecall` path, the trap entry has already saved the full
-interrupted machine state. The scheduler can keep that frame on the outgoing
-thread's stack and return a different thread's frame to the assembly restore
-path.
+Thread switches use trap-frame ownership. Each thread has a saved
+`trap_frame_t *` in its TCB. When a thread is interrupted, yields, sleeps,
+blocks, or exits through the S-mode trap path, the trap entry has already saved
+the full interrupted S-mode state. The scheduler can keep that frame on the
+outgoing thread's stack and return a different thread's frame to the assembly
+restore path.
 
 The timer interrupt handler does not call `thread_yield()` and does not run
 ready-queue policy directly. It updates timer state and notifies the scheduler
@@ -113,14 +113,14 @@ so the kernel uses the trap return path as that boundary.
 
 A newly created thread has never trapped or been preempted, so
 `thread_create()` builds a synthetic trap frame on the new thread's stack. The
-saved `mepc` points at `thread_trampoline()`, and the saved `sp` points at the
+saved EPC slot points at `thread_trampoline()`, and the saved `sp` points at the
 top of the thread's kernel stack.
 
 On first schedule:
 
 1. `trap_restore()` loads the selected trap frame.
-2. It restores `mepc`, `mstatus`, general-purpose registers, and `sp`.
-3. `mret` enters `thread_trampoline()`.
+2. It restores `sepc`, `sstatus`, general-purpose registers, and `sp`.
+3. `sret` enters `thread_trampoline()` in S-mode.
 4. The trampoline calls the thread entry function.
 5. If the entry function returns, the trampoline calls `thread_exit()`.
 
@@ -139,12 +139,12 @@ Queue semantics:
 
 - `thread_create()` marks a new real thread `THREAD_READY` and appends it to the
   ready queue tail.
-- `thread_yield()` enters the trap path with a machine-mode `ecall`; the trap
+- `thread_yield()` enters the trap path with a fixed-width `ebreak`; the trap
   scheduler marks the current real running thread `THREAD_READY`, appends it to
   the ready queue tail, then pops the next TID from the ready queue head.
 - timer ticks increment the current thread's quantum counter. Once it reaches
   `THREAD_QUANTUM_TICKS`, the scheduler requests preemption.
-- `thread_sleep(ticks)` enters the trap path with a machine-mode `ecall`. For a
+- `thread_sleep(ticks)` enters the trap path with a fixed-width `ebreak`. For a
   positive tick count, the current real thread becomes `THREAD_BLOCKED` with
   `THREAD_WAIT_SLEEP`, stores an absolute `wake_tick`, enters the sleep queue,
   and the scheduler selects the next ready thread.
@@ -209,7 +209,7 @@ for unrelated events would make FIFO wake order meaningless.
 
 Current wait queue semantics:
 
-- `wait_queue_sleep(queue)` enters the trap path with a machine-mode `ecall`.
+- `wait_queue_sleep(queue)` enters the trap path with a fixed-width `ebreak`.
 - the current real thread becomes `THREAD_BLOCKED` with `THREAD_WAIT_QUEUE`.
 - the thread enters `queue` in FIFO order.
 - `wait_queue_sleep_timeout(queue, ticks)` enters both the wait queue and the
@@ -287,8 +287,14 @@ Mutex ownership and mutex timeout policy are implemented in `kernel/core/sync.c`
 ## Interrupt Safety
 
 Scheduler state mutations are protected with `irq_save()` and `irq_restore()`.
-This prevents a machine-timer interrupt from observing or acting on partial
-scheduler state during ready-queue and TCB transitions.
+After the S-mode migration, these helpers mask `sstatus.SIE`. This prevents a
+supervisor timer interrupt from observing or acting on partial scheduler state
+during ready-queue and TCB transitions.
+
+M-mode may still interrupt S-mode for machine-timer delivery, so M-mode code is
+kept policy-free and must not touch scheduler state. The machine shim only
+reflects timer completion as a supervisor timer interrupt; the S-mode trap
+handler owns tick accounting, wakeups, tracing, and preemption.
 
 The kernel also tracks a small `preempt_disable_depth`. Timer ticks continue to
 increment while preemption is disabled, but the scheduling effect is deferred
@@ -300,6 +306,6 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Move to virtual memory and allocation.
+- Add per-thread address-space state when user tasks arrive.
 - Add priority scheduling as a future scheduling extension if priority-inversion
   experiments become a goal.

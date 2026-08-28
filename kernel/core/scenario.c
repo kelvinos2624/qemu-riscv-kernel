@@ -42,7 +42,7 @@ static void scenario_allocator(void)
     console_write("scenario: allocator\n");
 
     const size_t initial_free = page_free_count();
-    if (initial_free == 0 || page_total_count() != initial_free) {
+    if (initial_free == 0 || page_total_count() == 0) {
         PANIC("page allocator empty after init");
     }
 

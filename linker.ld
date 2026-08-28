@@ -15,16 +15,22 @@ SECTIONS
     PROVIDE(__kernel_start = .);
 
     .text : ALIGN(4K) {
+        PROVIDE(__text_start = .);
         KEEP(*(.text.boot))
         *(.text .text.*)
+        PROVIDE(__text_end = .);
     }
 
     .rodata : ALIGN(4K) {
+        PROVIDE(__rodata_start = .);
         *(.rodata .rodata.*)
+        PROVIDE(__rodata_end = .);
     }
 
     .data : ALIGN(4K) {
+        PROVIDE(__data_start = .);
         *(.data .data.*)
+        PROVIDE(__data_end = .);
     }
 
     .bss : ALIGN(4K) {
