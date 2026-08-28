@@ -30,10 +30,10 @@ static void trap_print_field(const char *name, uint64_t value)
 
 void trap_init(void)
 {
-    csr_write_mtvec((uint64_t)(uintptr_t)trap_entry);
+    csr_write_stvec((uint64_t)(uintptr_t)trap_entry);
 
-    console_write("trap: mtvec=");
-    console_write_hex64(csr_read_mtvec());
+    console_write("trap: stvec=");
+    console_write_hex64(csr_read_stvec());
     console_write("\n");
 }
 
@@ -41,7 +41,7 @@ void trap_selftest(void)
 {
     trap_selftest_seen = 0;
 
-    __asm__ volatile("ecall");
+    __asm__ volatile(".4byte 0x00100073" : : : "memory");
 
     if (trap_selftest_seen != 1) {
         PANIC("trap self-test did not return through handler");
@@ -55,17 +55,17 @@ trap_frame_t *trap_handle(trap_frame_t *frame)
     const uint64_t is_interrupt = frame->mcause & MCAUSE_INTERRUPT;
     const uint64_t cause = frame->mcause & MCAUSE_CODE_MASK;
 
-    if (!is_interrupt && cause == MCAUSE_ECALL_M_MODE && trap_selftest_seen == 0) {
+    if (!is_interrupt && cause == MCAUSE_BREAKPOINT && trap_selftest_seen == 0) {
         trap_selftest_seen = 1;
         frame->mepc += 4;
         return frame;
     }
 
-    if (!is_interrupt && cause == MCAUSE_ECALL_M_MODE) {
-        return thread_handle_ecall_from_trap(frame);
+    if (!is_interrupt && cause == MCAUSE_BREAKPOINT) {
+        return thread_handle_control_trap_from_trap(frame);
     }
 
-    if (is_interrupt && cause == MCAUSE_MACHINE_TIMER_INTERRUPT) {
+    if (is_interrupt && cause == SCAUSE_SUPERVISOR_TIMER_INTERRUPT) {
         timer_handle_interrupt();
         return thread_maybe_preempt_from_trap(frame);
     }

@@ -1,4 +1,5 @@
 #include "arch/riscv64/csr.h"
+#include "arch/riscv64/machine.h"
 #include "core/kernel.h"
 #include "core/thread.h"
 #include "drivers/timer.h"
@@ -11,34 +12,31 @@ static inline uint64_t mmio_read64(uintptr_t addr)
     return *(volatile uint64_t *)addr;
 }
 
-static inline void mmio_write64(uintptr_t addr, uint64_t value)
-{
-    *(volatile uint64_t *)addr = value;
-}
-
 static uint64_t timer_read_mtime(void)
 {
     return mmio_read64(TIMER_CLINT_MTIME);
 }
 
-static void timer_write_mtimecmp(uint64_t value)
+static void timer_set_deadline(uint64_t value)
 {
-    mmio_write64(TIMER_CLINT_MTIMECMP, value);
+    if (machine_call_set_timer(value) != 0) {
+        PANIC("machine timer call failed");
+    }
 }
 
 void timer_init(void)
 {
     ticks = 0;
     next_compare = timer_read_mtime() + TIMER_INTERVAL_CYCLES;
-    timer_write_mtimecmp(next_compare);
+    timer_set_deadline(next_compare);
 
-    csr_set_mie(MIE_MTIE);
-    csr_set_mstatus(MSTATUS_MIE);
+    csr_set_sie(SIE_STIE);
+    csr_set_sstatus(SSTATUS_SIE);
 
     console_write("timer: interval=");
     console_write_hex64(TIMER_INTERVAL_CYCLES);
-    console_write(" mie=");
-    console_write_hex64(csr_read_mie());
+    console_write(" sie=");
+    console_write_hex64(csr_read_sie());
     console_write("\n");
 }
 
@@ -52,7 +50,7 @@ void timer_handle_interrupt(void)
         next_compare += TIMER_INTERVAL_CYCLES;
     } while (next_compare <= now);
 
-    timer_write_mtimecmp(next_compare);
+    timer_set_deadline(next_compare);
     thread_on_timer_tick();
 }
 

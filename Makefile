@@ -39,6 +39,7 @@ LDFLAGS := -T linker.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(KERNEL_MAP)
 KERNEL_SRCS := \
 	kernel/arch/riscv64/boot.S \
 	kernel/arch/riscv64/context.S \
+	kernel/arch/riscv64/machine.c \
 	kernel/arch/riscv64/trap.S \
 	kernel/core/main.c \
 	kernel/core/panic.c \
@@ -47,6 +48,7 @@ KERNEL_SRCS := \
 	kernel/core/thread.c \
 	kernel/core/trace.c \
 	kernel/memory/heap.c \
+	kernel/memory/paging.c \
 	kernel/memory/page_alloc.c \
 	kernel/memory/vm.c \
 	kernel/core/trap.c \

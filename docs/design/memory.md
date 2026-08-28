@@ -194,9 +194,10 @@ RISC-V PTE rule.
 It returns the mapped physical page address plus the original 12-bit page
 offset, or `VM_TRANSLATE_INVALID` when the virtual address is not mapped.
 
-This milestone builds and validates page-table data structures while paging is
-still disabled. It does not write `satp`, execute `sfence.vma`, invalidate TLB
-state, install page-fault handling, or switch kernel/user address spaces.
+The page-table primitive milestone built and validated page-table data
+structures while paging was still disabled. It did not write `satp`, execute
+`sfence.vma`, invalidate TLB state, install page-fault handling, or switch
+kernel/user address spaces.
 
 `vm_unmap_page()` clears only the leaf PTE. Empty intermediate page-table pages
 are deliberately not reclaimed in this milestone. Deferring reclamation keeps
@@ -208,6 +209,35 @@ Failed `vm_map_page()` calls are not allowed to retain newly allocated
 intermediate page-table pages. If a sparse mapping allocates part of a fresh
 branch and then runs out of physical pages, the walker clears the PTEs it
 installed during that call and returns those pages to `page_alloc()`.
+
+## Kernel Paging
+
+The kernel now enables Sv39 and runs normal kernel code in S-mode under an
+identity-mapped kernel page table. The M-mode bootstrap builds the page table,
+installs it in `satp`, executes `sfence.vma`, and enters `supervisor_main()`
+with `mret`.
+
+Identity mapping is a deliberate first paging step. Virtual addresses equal
+physical addresses for kernel text, rodata, writable kernel memory, allocator
+managed RAM, and MMIO. This preserves existing C pointers, static thread
+stacks, page allocator returns, and device constants while proving that normal
+kernel instruction fetches, loads, stores, traps, and timer interrupts work
+through hardware translation.
+
+Linker symbols define the permission boundaries:
+
+- text: read/execute/accessed
+- rodata: read/accessed
+- data, bss, allocator metadata, stacks, and free RAM: read/write/accessed/dirty
+- UART and CLINT MMIO: read/write/accessed/dirty
+
+The current RISC-V page-table flags do not encode rich memory attributes, so the
+MMIO mappings are documented as QEMU/simple-platform mappings. A later platform
+layer can add stronger device-memory policy if the target changes.
+
+The active kernel page table is global for all current kernel threads. There is
+no per-thread address-space switch yet, no user page table, and no page-fault
+recovery policy yet.
 
 ## STM32 RTOS Connection
 
@@ -230,12 +260,15 @@ kernel is still single-hart.
 The ECE350 paging model maps directly onto this layer: virtual page numbers
 select page-table entries, invalid entries represent unmapped addresses that
 will later fault, and the page offset is copied unchanged through translation.
+Kernel paging adds the live page-table base register and TLB-flush step from
+the same notes: the `satp` write selects the page table, and `sfence.vma`
+orders the transition before S-mode executes through Sv39.
 
 ## Test Evidence
 
 The allocator scenario verifies:
 
-- the initialized free count is nonzero
+- the scenario starting free count is nonzero after kernel paging setup
 - allocated pages are aligned
 - two live allocations are distinct
 - a freed page is reused

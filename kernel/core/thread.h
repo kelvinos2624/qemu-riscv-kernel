@@ -69,7 +69,7 @@ int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks);
 tid_t wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 void thread_on_timer_tick(void);
-struct trap_frame *thread_handle_ecall_from_trap(struct trap_frame *frame);
+struct trap_frame *thread_handle_control_trap_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);
 
 #endif

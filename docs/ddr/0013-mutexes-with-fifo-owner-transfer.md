@@ -4,6 +4,11 @@
 
 Accepted.
 
+Follow-up: DDR 21 migrates normal kernel execution to S-mode. The mutex design
+still relies on short `irq_save()` / `irq_restore()` critical sections, but
+those helpers now mask `sstatus.SIE`; M-mode remains a policy-free platform
+shim.
+
 ## Context
 
 Wait queues provide a reusable way to block and wake threads, but they do not
