@@ -18,6 +18,7 @@ static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
 static void scenario_heap(void) __attribute__((noreturn));
 static void scenario_vm(void) __attribute__((noreturn));
+static void scenario_page_fault(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 
 static int page_is_aligned(const void *page)
@@ -346,6 +347,33 @@ static void scenario_vm(void)
     scenario_idle_forever();
 }
 
+static volatile uint64_t page_fault_sink;
+
+static void scenario_fault_load(uintptr_t address)
+{
+    uint64_t value;
+
+    __asm__ volatile(
+        ".option push\n"
+        ".option norvc\n"
+        "ld %0, 0(%1)\n"
+        ".option pop\n"
+        : "=r"(value)
+        : "r"(address)
+        : "memory");
+
+    page_fault_sink = value;
+}
+
+static void scenario_page_fault(void)
+{
+    console_write("scenario: page-fault\n");
+
+    scenario_fault_load(0x0000000040000000ull);
+
+    PANIC("page fault scenario returned from unmapped load");
+}
+
 static void demo_thread_a(void *arg)
 {
     (void)arg;
@@ -418,6 +446,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_VM) {
         scenario_vm();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_PAGE_FAULT) {
+        scenario_page_fault();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {

@@ -34,6 +34,15 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "sv39 page table primitives scenario",
     },
+    "page-fault": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: page-fault",
+            "trap: page fault access=load",
+        ],
+        "required_trace_types": [],
+        "success": "page fault diagnostic scenario",
+    },
     "scheduler-sync": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -70,6 +79,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 12:")
         or line.startswith("milestone 13:")
         or line.startswith("milestone 10:")
+        or line.startswith("trap: page fault")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
     )
@@ -146,6 +156,8 @@ def main() -> int:
 
                             if stripped_line.startswith("trace: begin"):
                                 sequence_line = "trace: begin"
+                            elif stripped_line.startswith("trap: page fault"):
+                                sequence_line = stripped_line.split(" scause=", 1)[0]
                             else:
                                 sequence_line = stripped_line
 

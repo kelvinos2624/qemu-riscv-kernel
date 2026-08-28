@@ -236,8 +236,10 @@ MMIO mappings are documented as QEMU/simple-platform mappings. A later platform
 layer can add stronger device-memory policy if the target changes.
 
 The active kernel page table is global for all current kernel threads. There is
-no per-thread address-space switch yet, no user page table, and no page-fault
-recovery policy yet.
+no per-thread address-space switch yet and no user page table. S-mode page
+faults are decoded and reported with architectural trap metadata, but they are
+still fatal. Recoverable faults are deferred until the kernel has a narrow
+safe-usercopy contract.
 
 ## STM32 RTOS Connection
 
@@ -297,10 +299,17 @@ The VM scenario verifies:
 - rollback of partially allocated page-table branches on `VM_ERR_NO_MEMORY`
 - invalid alignment, invalid flags, and non-canonical virtual-address rejection
 
+The page-fault scenario verifies:
+
+- an unmapped Sv39 load faults under the active kernel page table
+- the trap path identifies the fault as a load page fault
+- the diagnostic includes the trap CSRs and current execution context
+
 The QEMU smoke test checks for:
 
 ```text
 milestone 11: physical page allocator
 milestone 12: kernel heap
 milestone 13: sv39 page table primitives
+trap: page fault access=load
 ```

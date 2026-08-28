@@ -58,21 +58,55 @@ by 4, and returns to the instruction after the trap. The kernel uses fixed-width
 `ebreak` for internal thread-control traps because S-mode `ecall` is reserved
 for calls into the M-mode shim.
 
-Unexpected S-mode traps print CSR diagnostics and panic. Unexpected M-mode traps
-also panic, because the M-mode shim has no recovery policy of its own.
+## Page Fault Diagnostics
+
+S-mode decodes instruction, load, and store/AMO page faults before the generic
+unexpected-trap panic path. A page fault report prints:
+
+- access type: instruction, load, or store
+- `scause`
+- `sepc`
+- `stval`
+- `sstatus`
+- `satp`
+- current thread ID
+
+This is diagnostic-only in the current milestone. The kernel does not treat any
+page fault as recoverable yet, does not advance `sepc`, and does not resume
+execution after the report. That keeps real kernel faults loud while the project
+still lacks user mode, address-space teardown, and safe usercopy.
+
+The `page-fault` scenario deliberately performs an unmapped load from
+`0x0000000040000000`. That address is canonical under Sv39 and outside the
+active identity-mapped kernel RAM/MMIO regions, so the smoke test can verify the
+load-fault diagnostic without relying on recovery.
+
+Recoverable fault probes are deferred until safe usercopy. At that point the
+kernel can define a narrow contract for expected faults, identify the faulting
+copy site, and return an error instead of panicking.
+
+Unexpected S-mode traps still print CSR diagnostics and panic. Unexpected M-mode
+traps also panic, because the M-mode shim has no recovery policy of its own.
 
 ## ECE350 and STM32 RTOS Connection
 
 This follows the ECE350 distinction between hardware traps and OS policy:
 hardware transfers control to a privileged handler, but the kernel decides what
-the event means.
+the event means. Page faults are now decoded as a specific hardware exception,
+but the recovery policy is intentionally deferred.
 
 The timer/preemption path mirrors the STM32 RTOS SysTick/PendSV split. The
 timer creates a controlled scheduling point, while the actual context switch
 happens at trap return using a full saved context.
 
+The page-fault scenario is unlike the STM32 RTOS lab's MPU-less heap faults:
+Sv39 gives the kernel architectural fault metadata (`scause`, `sepc`, `stval`)
+instead of only a generic hard-fault style failure. The shared lesson is still
+the same: keep fault handling deterministic and preserve enough context to debug
+the broken invariant.
+
 ## Next Work
 
-- Add page-fault-specific diagnostics.
+- Add recoverable usercopy fault probes once U-mode and user mappings exist.
 - Replace the kernel-only control trap path with real user syscalls once U-mode
   exists.
