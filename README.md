@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[##############------] 70%`
+Progress: `[###############-----] 75%`
 
 The kernel currently boots on QEMU `virt`, initializes UART output, installs a
 machine-mode trap path, handles timer interrupts, and runs preemptive FIFO
@@ -23,9 +23,10 @@ mutexes with FIFO owner transfer, timeout-aware blocking, and structured
 scheduler tracing. The scheduling and synchronization section is complete for
 the current round-robin scope; priority-inversion experiments are deferred until
 the kernel has a real priority scheduler. The virtual-memory and allocation
-section now includes a bitmap physical page allocator and a page-backed
-size-class kernel heap. Page tables, userspace isolation, syscalls, and the
-simulated accelerator driver remain future milestones.
+section now includes a bitmap physical page allocator, a page-backed size-class
+kernel heap, and Sv39 page-table primitives. Hardware paging, page faults,
+userspace isolation, syscalls, and the simulated accelerator driver remain
+future milestones.
 
 ## Project Goals
 
@@ -121,9 +122,14 @@ Virtual memory and allocation setup has begun:
 - heap stats for page count, free bytes, and allocated bytes
 - heap scenario coverage for alignment, reuse, zeroing, growth, and oversized
   allocation failure
+- Sv39 root page-table allocation from the physical page allocator
+- lazy intermediate page-table allocation
+- 4 KiB page map, unmap, and software translation helpers
+- canonical virtual-address, alignment, duplicate-map, and permission checks
+- documented deferral of empty intermediate page-table reclamation
 
-The next memory milestones are page-table primitives, kernel paging, page-fault
-diagnostics, userspace mappings, and safe usercopy.
+The next memory milestones are kernel paging, page-fault diagnostics, userspace
+mappings, address-space teardown, and safe usercopy.
 
 Common boot output:
 
@@ -153,6 +159,14 @@ Heap scenario output:
 scenario: heap
 heap: pages=... free=... allocated=...
 milestone 12: kernel heap
+```
+
+VM scenario output:
+
+```text
+scenario: vm
+vm: root=... free_pages=...
+milestone 13: sv39 page table primitives
 ```
 
 Scheduler/synchronization scenario output:
@@ -298,6 +312,7 @@ Run one scenario:
 ```sh
 make test SCENARIO=allocator
 make test SCENARIO=heap
+make test SCENARIO=vm
 make test SCENARIO=scheduler-sync
 ```
 
@@ -309,6 +324,7 @@ make debug
 make test
 make test SCENARIO=allocator
 make test SCENARIO=heap
+make test SCENARIO=vm
 make clean
 make toolcheck
 ```
@@ -334,15 +350,17 @@ The current scenarios are:
 
 - `allocator`: validates the physical page allocator self-test milestone
 - `heap`: validates the kernel heap self-test milestone
+- `vm`: validates Sv39 page-table primitives before hardware paging is enabled
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
 
 The current tests verify that the allocator initializes and survives its boot
-self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, one
-thread times out while waiting for a mutex, the idle task runs while all real
-threads are blocked, a later thread can still acquire the mutex after the owner
-unlocks, and the trace dump includes key events such as context switches, idle
-entry, wait timeout, and mutex timeout.
+self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
+VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
+one thread times out while waiting for a mutex, the idle task runs while all
+real threads are blocked, a later thread can still acquire the mutex after the
+owner unlocks, and the trace dump includes key events such as context switches,
+idle entry, wait timeout, and mutex timeout.
 
 Planned test categories:
 

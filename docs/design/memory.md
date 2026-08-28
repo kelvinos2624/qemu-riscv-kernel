@@ -6,13 +6,14 @@ This design note covers the memory-management work that starts the
 virtual-memory and allocation section. The physical page allocator owns free RAM
 after the kernel image and hands out fixed-size page frames. The kernel heap
 then lazily subdivides some of those frames into smaller size-class pools for
-kernel objects.
+kernel objects. The Sv39 page-table layer builds software-managed address spaces
+from those same physical frames.
 
-The kernel still runs with address translation disabled, so returned page and
-heap addresses are currently identity-mapped machine addresses that C code can
-use directly as pointers. Later virtual-memory work may wrap physical-frame
-values in a physical-address type once virtual and physical addresses are no
-longer interchangeable.
+The kernel still runs with address translation disabled, so returned page,
+heap, and page-table addresses are currently identity-mapped machine addresses
+that C code can use directly as pointers. Later virtual-memory work may wrap
+physical-frame values in a physical-address type once virtual and physical
+addresses are no longer interchangeable.
 
 ## RAM Bounds
 
@@ -167,6 +168,47 @@ This keeps the first heap simple and avoids churn between `kmalloc()` and
 `page_alloc()`. A later memory-pressure policy can reclaim fully free pool pages
 or keep only a bounded number of warm pages per class.
 
+## Sv39 Page-Table Primitives
+
+The virtual-memory layer exposes:
+
+```c
+int vm_space_init(vm_space_t *space);
+int vm_map_page(vm_space_t *space, uintptr_t va, uintptr_t pa, uint64_t flags);
+int vm_unmap_page(vm_space_t *space, uintptr_t va);
+uintptr_t vm_translate(const vm_space_t *space, uintptr_t va);
+```
+
+`vm_space_t` owns one Sv39 root page table. The root and all intermediate
+page-table pages come directly from `page_alloc()` and are zero-filled before
+use. The page-table walker allocates missing intermediate levels lazily when
+mapping a virtual address.
+
+The implementation supports three Sv39 levels, 512 entries per table, 9-bit VPN
+indices, and 4 KiB leaf mappings. It intentionally does not support superpages
+yet. Branch PTEs contain only `V`; leaf PTEs must contain `V` plus a readable or
+executable permission. Writable mappings must also be readable, matching the
+RISC-V PTE rule.
+
+`vm_translate()` is a software walk used for tests and future kernel helpers.
+It returns the mapped physical page address plus the original 12-bit page
+offset, or `VM_TRANSLATE_INVALID` when the virtual address is not mapped.
+
+This milestone builds and validates page-table data structures while paging is
+still disabled. It does not write `satp`, execute `sfence.vma`, invalidate TLB
+state, install page-fault handling, or switch kernel/user address spaces.
+
+`vm_unmap_page()` clears only the leaf PTE. Empty intermediate page-table pages
+are deliberately not reclaimed in this milestone. Deferring reclamation keeps
+the first VM primitive small and avoids recursive subtree accounting before
+there is real address-space teardown or memory pressure. A future address-space
+destroy path can reclaim page-table pages with a post-order walk.
+
+Failed `vm_map_page()` calls are not allowed to retain newly allocated
+intermediate page-table pages. If a sparse mapping allocates part of a fresh
+branch and then runs out of physical pages, the walker clears the PTEs it
+installed during that call and returns those pages to `page_alloc()`.
+
 ## STM32 RTOS Connection
 
 The STM32 RTOS lab path favors bounded kernel-owned structures and predictable
@@ -179,6 +221,15 @@ Using pools here provides a different allocator flavor from a first-fit RTOS
 heap: allocation within a pool is free-list based, no block coalescing is
 needed, and external fragmentation is avoided inside each size class. The
 tradeoff is internal fragmentation when requests round up to the next class.
+
+Sv39 page tables go beyond the STM32 RTOS lab's MCU-style memory model. The
+connection is mostly conceptual: keep memory ownership explicit, keep failure
+paths deterministic, and use short interrupt-masked critical sections while the
+kernel is still single-hart.
+
+The ECE350 paging model maps directly onto this layer: virtual page numbers
+select page-table entries, invalid entries represent unmapped addresses that
+will later fault, and the page offset is copied unchanged through translation.
 
 ## Test Evidence
 
@@ -202,9 +253,21 @@ The heap scenario verifies:
 - oversized allocation failure
 - `kfree(NULL)` no-op behavior
 
+The VM scenario verifies:
+
+- root page-table allocation and alignment
+- lazy intermediate page-table allocation
+- 4 KiB page mapping and offset-preserving translation
+- duplicate mapping rejection
+- unmap and duplicate-unmap behavior
+- sparse virtual-address mappings that require separate page-table branches
+- rollback of partially allocated page-table branches on `VM_ERR_NO_MEMORY`
+- invalid alignment, invalid flags, and non-canonical virtual-address rejection
+
 The QEMU smoke test checks for:
 
 ```text
 milestone 11: physical page allocator
 milestone 12: kernel heap
+milestone 13: sv39 page table primitives
 ```

@@ -5,6 +5,7 @@
 #include "core/trace.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
+#include "memory/vm.h"
 
 #ifndef CONFIG_SCENARIO
 #define CONFIG_SCENARIO SCENARIO_SCHEDULER_SYNC
@@ -16,6 +17,7 @@ static volatile int demo_shared_counter;
 static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
 static void scenario_heap(void) __attribute__((noreturn));
+static void scenario_vm(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 
 static int page_is_aligned(const void *page)
@@ -218,6 +220,132 @@ static void scenario_heap(void)
     scenario_idle_forever();
 }
 
+static void scenario_vm(void)
+{
+    console_write("scenario: vm\n");
+
+    const size_t initial_free = page_free_count();
+
+    vm_space_t space;
+    if (vm_space_init(&space) != VM_OK || space.root == NULL) {
+        PANIC("vm space init failed");
+    }
+    if (!page_is_aligned(space.root)) {
+        PANIC("vm root page is unaligned");
+    }
+
+    void *data_page = page_alloc();
+    if (data_page == NULL || !page_is_aligned(data_page)) {
+        PANIC("vm data page allocation failed");
+    }
+
+    const uintptr_t va = 0x0000000040000000ull;
+    const uintptr_t pa = (uintptr_t)data_page;
+    const uint64_t rw_flags = VM_PTE_V | VM_PTE_R | VM_PTE_W;
+
+    if (vm_map_page(&space, va, pa, rw_flags) != VM_OK) {
+        PANIC("vm map page failed");
+    }
+    if (vm_translate(&space, va) != pa) {
+        PANIC("vm translate base failed");
+    }
+    if (vm_translate(&space, va + 0x123u) != pa + 0x123u) {
+        PANIC("vm translate offset failed");
+    }
+    if (vm_map_page(&space, va, pa, rw_flags) != VM_ERR_EXISTS) {
+        PANIC("vm duplicate map did not fail");
+    }
+    if (vm_unmap_page(&space, va) != VM_OK) {
+        PANIC("vm unmap page failed");
+    }
+    if (vm_translate(&space, va) != VM_TRANSLATE_INVALID) {
+        PANIC("vm unmapped translation succeeded");
+    }
+    if (vm_unmap_page(&space, va) != VM_ERR_NOT_MAPPED) {
+        PANIC("vm duplicate unmap did not fail");
+    }
+
+    void *sparse_a = page_alloc();
+    void *sparse_b = page_alloc();
+    if (sparse_a == NULL || sparse_b == NULL) {
+        PANIC("vm sparse data allocation failed");
+    }
+
+    const uintptr_t sparse_va_a = 0x0000000000200000ull;
+    const uintptr_t sparse_va_b = 0x0000002000000000ull;
+    if (vm_map_page(&space, sparse_va_a, (uintptr_t)sparse_a, rw_flags) != VM_OK ||
+        vm_map_page(&space, sparse_va_b, (uintptr_t)sparse_b, rw_flags) != VM_OK) {
+        PANIC("vm sparse map failed");
+    }
+    if (vm_translate(&space, sparse_va_a) != (uintptr_t)sparse_a ||
+        vm_translate(&space, sparse_va_b) != (uintptr_t)sparse_b) {
+        PANIC("vm sparse translate failed");
+    }
+
+    const size_t free_before_exhaustion = page_free_count();
+    void *held_pages = NULL;
+    while (page_free_count() > 1) {
+        void *page = page_alloc();
+        if (page == NULL) {
+            PANIC("vm exhaustion setup failed");
+        }
+
+        *(void **)page = held_pages;
+        held_pages = page;
+    }
+
+    const uintptr_t failing_va = 0x0000003000000000ull;
+    const size_t free_before_failed_map = page_free_count();
+    if (free_before_failed_map != 1) {
+        PANIC("vm failed-map setup mismatch");
+    }
+    if (vm_map_page(&space, failing_va, pa, rw_flags) != VM_ERR_NO_MEMORY) {
+        PANIC("vm failed sparse map did not report no memory");
+    }
+    if (page_free_count() != free_before_failed_map) {
+        PANIC("vm failed sparse map leaked page-table pages");
+    }
+    if (vm_translate(&space, failing_va) != VM_TRANSLATE_INVALID) {
+        PANIC("vm failed sparse map left a mapping");
+    }
+
+    while (held_pages != NULL) {
+        void *page = held_pages;
+        held_pages = *(void **)held_pages;
+        page_free(page);
+    }
+    if (page_free_count() != free_before_exhaustion) {
+        PANIC("vm exhaustion cleanup mismatch");
+    }
+
+    if (vm_map_page(&space, va + 1u, pa, rw_flags) != VM_ERR_INVALID) {
+        PANIC("vm accepted unaligned va");
+    }
+    if (vm_map_page(&space, va, pa + 1u, rw_flags) != VM_ERR_INVALID) {
+        PANIC("vm accepted unaligned pa");
+    }
+    if (vm_map_page(&space, va, pa, VM_PTE_V | VM_PTE_W) != VM_ERR_INVALID) {
+        PANIC("vm accepted write without read");
+    }
+    if (vm_map_page(&space, 0x0000008000000000ull, pa, rw_flags) !=
+        VM_ERR_INVALID) {
+        PANIC("vm accepted non-canonical va");
+    }
+
+    if (page_free_count() >= initial_free) {
+        PANIC("vm did not allocate page-table pages");
+    }
+
+    console_write("vm: root=");
+    console_write_hex64((uintptr_t)space.root);
+    console_write(" free_pages=");
+    console_write_hex64(page_free_count());
+    console_write("\n");
+    console_write("milestone 13: sv39 page table primitives\n");
+
+    scenario_idle_forever();
+}
+
 static void demo_thread_a(void *arg)
 {
     (void)arg;
@@ -286,6 +414,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_HEAP) {
         scenario_heap();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_VM) {
+        scenario_vm();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {
