@@ -63,6 +63,16 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "first user task scenario",
     },
+    "usercopy": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: usercopy",
+            "usercopy: passed",
+            "milestone 16: safe usercopy",
+        ],
+        "required_trace_types": [],
+        "success": "safe usercopy scenario",
+    },
     "scheduler-sync": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -100,10 +110,12 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 13:")
         or line.startswith("milestone 14:")
         or line.startswith("milestone 15:")
+        or line.startswith("milestone 16:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
         or line.startswith("user: exited code=")
+        or line.startswith("usercopy:")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
     )

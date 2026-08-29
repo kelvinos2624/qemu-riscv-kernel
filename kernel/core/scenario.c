@@ -9,6 +9,7 @@
 #include "memory/page_alloc.h"
 #include "memory/paging.h"
 #include "memory/user_space.h"
+#include "memory/usercopy.h"
 #include "memory/vm.h"
 
 #ifndef CONFIG_SCENARIO
@@ -25,6 +26,7 @@ static void scenario_vm(void) __attribute__((noreturn));
 static void scenario_page_fault(void) __attribute__((noreturn));
 static void scenario_user_space(void) __attribute__((noreturn));
 static void scenario_first_user(void) __attribute__((noreturn));
+static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 
 extern char first_user_start[];
@@ -546,6 +548,145 @@ static void scenario_first_user(void)
     trap_restore(frame);
 }
 
+static void expect_usercopy_invalid(int result, const char *name)
+{
+    if (result != USERCOPY_ERR_INVALID) {
+        console_write("usercopy: expected invalid for ");
+        console_write(name);
+        console_write("\n");
+        PANIC("usercopy invalid check failed");
+    }
+}
+
+static void usercopy_worker(void *arg)
+{
+    (void)arg;
+
+    uint8_t *page_a = page_alloc();
+    uint8_t *page_b = page_alloc();
+    uint8_t *read_only_page = page_alloc();
+    if (page_a == NULL || page_b == NULL || read_only_page == NULL) {
+        PANIC("usercopy backing page allocation failed");
+    }
+
+    memory_zero(page_a, PAGE_SIZE);
+    memory_zero(page_b, PAGE_SIZE);
+    memory_zero(read_only_page, PAGE_SIZE);
+
+    const uintptr_t user_a = USER_SPACE_CODE_BASE;
+    const uintptr_t user_b = USER_SPACE_CODE_BASE + PAGE_SIZE;
+    const uintptr_t user_read_only = USER_SPACE_CODE_BASE + (4u * PAGE_SIZE);
+    const uint64_t user_rw =
+        VM_PTE_V | VM_PTE_R | VM_PTE_W | VM_PTE_U | VM_PTE_A | VM_PTE_D;
+    const uint64_t user_ro = VM_PTE_V | VM_PTE_R | VM_PTE_U | VM_PTE_A;
+
+    if (user_space_map_page(paging_kernel_space(), user_a, (uintptr_t)page_a, user_rw) !=
+            VM_OK ||
+        user_space_map_page(paging_kernel_space(), user_b, (uintptr_t)page_b, user_rw) !=
+            VM_OK ||
+        user_space_map_page(
+            paging_kernel_space(),
+            user_read_only,
+            (uintptr_t)read_only_page,
+            user_ro
+        ) != VM_OK) {
+        PANIC("usercopy map failed");
+    }
+
+    for (size_t i = 0; i < PAGE_SIZE; i++) {
+        page_a[i] = (uint8_t)(0x10u + (i & 0x0fu));
+        page_b[i] = (uint8_t)(0x80u + (i & 0x0fu));
+    }
+
+    uint8_t kernel_buf[8];
+    if (copy_from_user(kernel_buf, (const void *)(user_b - 4u), sizeof(kernel_buf)) !=
+        USERCOPY_OK) {
+        PANIC("usercopy cross-page read failed");
+    }
+    for (size_t i = 0; i < 4; i++) {
+        if (kernel_buf[i] != page_a[PAGE_SIZE - 4u + i]) {
+            PANIC("usercopy first-page read mismatch");
+        }
+        if (kernel_buf[4u + i] != page_b[i]) {
+            PANIC("usercopy second-page read mismatch");
+        }
+    }
+
+    const uint8_t write_buf[8] = {
+        0xa0u,
+        0xa1u,
+        0xa2u,
+        0xa3u,
+        0xa4u,
+        0xa5u,
+        0xa6u,
+        0xa7u,
+    };
+    if (copy_to_user((void *)(user_b - 2u), write_buf, sizeof(write_buf)) !=
+        USERCOPY_OK) {
+        PANIC("usercopy cross-page write failed");
+    }
+    if (page_a[PAGE_SIZE - 2u] != write_buf[0] ||
+        page_a[PAGE_SIZE - 1u] != write_buf[1]) {
+        PANIC("usercopy first-page write mismatch");
+    }
+    for (size_t i = 0; i < 6; i++) {
+        if (page_b[i] != write_buf[2u + i]) {
+            PANIC("usercopy second-page write mismatch");
+        }
+    }
+
+    expect_usercopy_invalid(
+        copy_from_user(kernel_buf, (const void *)0, 1),
+        "null guard"
+    );
+    expect_usercopy_invalid(
+        copy_from_user(kernel_buf, (const void *)UINTPTR_MAX, 2),
+        "overflow"
+    );
+    expect_usercopy_invalid(
+        copy_from_user(kernel_buf, (const void *)(user_b + PAGE_SIZE - 4u), 8),
+        "unmapped cross-page"
+    );
+    expect_usercopy_invalid(
+        copy_from_user(kernel_buf, (const void *)0x0000000010000000ull, 1),
+        "mmio-looking va"
+    );
+    expect_usercopy_invalid(
+        copy_to_user((void *)user_read_only, write_buf, 1),
+        "write to read-only mapping"
+    );
+
+    if (usercopy_recoverable_fault_selftest() != USERCOPY_ERR_FAULT) {
+        PANIC("usercopy recoverable fault selftest failed");
+    }
+
+    if (vm_unmap_page(paging_kernel_space(), user_a) != VM_OK ||
+        vm_unmap_page(paging_kernel_space(), user_b) != VM_OK ||
+        vm_unmap_page(paging_kernel_space(), user_read_only) != VM_OK) {
+        PANIC("usercopy unmap failed");
+    }
+
+    page_free(page_a);
+    page_free(page_b);
+    page_free(read_only_page);
+
+    console_write("usercopy: passed\n");
+    console_write("milestone 16: safe usercopy\n");
+    thread_exit();
+}
+
+static void scenario_usercopy(void)
+{
+    console_write("scenario: usercopy\n");
+
+    thread_init();
+    if (thread_create("usercopy", usercopy_worker, NULL) < 0) {
+        PANIC("failed to create usercopy worker");
+    }
+    thread_start();
+}
+
 static void demo_thread_a(void *arg)
 {
     (void)arg;
@@ -630,6 +771,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_FIRST_USER) {
         scenario_first_user();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {
+        scenario_usercopy();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {

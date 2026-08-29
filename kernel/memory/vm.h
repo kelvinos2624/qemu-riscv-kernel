@@ -33,5 +33,11 @@ int vm_space_destroy(vm_space_t *space);
 int vm_map_page(vm_space_t *space, uintptr_t va, uintptr_t pa, uint64_t flags);
 int vm_unmap_page(vm_space_t *space, uintptr_t va);
 uintptr_t vm_translate(const vm_space_t *space, uintptr_t va);
+int vm_get_mapping(
+    const vm_space_t *space,
+    uintptr_t va,
+    uintptr_t *pa,
+    uint64_t *flags
+);
 
 #endif

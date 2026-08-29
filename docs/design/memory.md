@@ -205,6 +205,11 @@ the first VM primitive small and avoids recursive subtree accounting before
 there is real address-space teardown or memory pressure. A future address-space
 destroy path can reclaim page-table pages with a post-order walk.
 
+After paging is active, successful `vm_map_page()` and `vm_unmap_page()` issue a
+coarse `sfence.vma`. This is intentionally simple for the current single-hart,
+single-active-address-space kernel. A later address-space switch or ASID design
+can replace it with narrower invalidation policy.
+
 Failed `vm_map_page()` calls are not allowed to retain newly allocated
 intermediate page-table pages. If a sparse mapping allocates part of a fresh
 branch and then runs out of physical pages, the walker clears the PTEs it
@@ -269,6 +274,52 @@ identity mapping for setup.
 Because the kernel writes the first user program into a data page and then
 executes it, the target ISA includes `zifencei` and the scenario executes
 `fence.i` before entering U-mode.
+
+## Safe Usercopy
+
+The safe-usercopy layer exposes:
+
+```c
+int copy_from_user(void *dst, const void *user_src, size_t len);
+int copy_to_user(void *user_dst, const void *src, size_t len);
+```
+
+Both functions use an all-or-error contract: they return `0` only when the full
+range was copied. Invalid user ranges and permission failures return
+`USERCOPY_ERR_INVALID`; a recoverable page fault during the guarded copy returns
+`USERCOPY_ERR_FAULT`. Destination contents are unspecified after failure.
+
+Usercopy is defensive by construction. It first validates the entire user range
+against the active kernel page table because the current PR8/PR9 kernel still
+temporarily maps user pages there. The usercopy policy checks that every page in
+the range:
+
+- is inside the sparse user VA layout
+- avoids the temporary QEMU `virt` MMIO-looking holes
+- has a present leaf mapping
+- has `VM_PTE_U`
+- has `VM_PTE_R` for `copy_from_user()` or `VM_PTE_W` for `copy_to_user()`
+
+`vm_get_mapping()` is the generic VM mechanism that reports a leaf translation
+and its flags. The usercopy layer owns the user/kernel policy built on top of
+that mechanism.
+
+After validation, usercopy briefly enables `SSTATUS_SUM` so S-mode can touch
+user pages. Interrupts stay masked across the `SUM` window and copy probe. This
+preserves the single-hart invariant that no other kernel thread runs while the
+kernel has temporary supervisor access to user mappings.
+
+Recoverable fault probes are per-thread state accessed through opaque thread
+APIs. The trap handler recovers only load/store page faults whose saved program
+counter is inside the armed copy loop and whose `stval` lies inside the intended
+user pointer range. `copy_from_user()` recovers only load page faults;
+`copy_to_user()` recovers only store page faults. This keeps usercopy robust
+against stale translations or future races while still allowing unrelated kernel
+faults inside the copy helper to panic normally.
+
+The current implementation supports cross-page copies. It does not yet validate
+against a per-process page table because separate user address spaces are not
+active yet.
 
 ## Kernel Paging
 
@@ -384,6 +435,14 @@ The first-user scenario verifies:
 - U-mode `ecall` traps back to S-mode
 - the exit syscall path returns to a kernel continuation
 
+The usercopy scenario verifies:
+
+- valid `copy_from_user()` across two user pages
+- valid `copy_to_user()` across two user pages
+- null-guard, overflow, unmapped, and MMIO-looking ranges are rejected
+- writes to read-only user mappings are rejected
+- the private recoverable-fault selftest returns `USERCOPY_ERR_FAULT`
+
 The QEMU smoke test checks for:
 
 ```text
@@ -393,4 +452,5 @@ milestone 13: sv39 page table primitives
 trap: page fault access=load
 milestone 14: user address space skeleton
 milestone 15: first user task
+milestone 16: safe usercopy
 ```
