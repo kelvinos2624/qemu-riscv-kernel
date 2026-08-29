@@ -23,8 +23,19 @@ typedef struct sleep_queue {
     uint16_t count;
 } sleep_queue_t;
 
+typedef struct usercopy_probe {
+    uint8_t active;
+    uintptr_t pc_start;
+    uintptr_t pc_end;
+    uintptr_t fixup_pc;
+    uintptr_t user_start;
+    uintptr_t user_end;
+    uint64_t fault_cause;
+} usercopy_probe_t;
+
 static thread_t threads[THREAD_MAX];
 static uint8_t thread_stacks[THREAD_MAX][THREAD_STACK_SIZE] __attribute__((aligned(16)));
+static usercopy_probe_t usercopy_probes[THREAD_MAX];
 static tid_queue_t ready_queue;
 static sleep_queue_t sleep_queue;
 static thread_t *current_thread;
@@ -41,6 +52,7 @@ static void null_task(void *arg);
 static void thread_trampoline(void) __attribute__((noreturn));
 static void preempt_disable(void);
 static void preempt_enable(void);
+static void usercopy_probe_clear(tid_t tid);
 
 static int tid_is_valid(tid_t tid)
 {
@@ -50,6 +62,27 @@ static int tid_is_valid(tid_t tid)
 static int tid_is_real(tid_t tid)
 {
     return tid > THREAD_NULL_TID && tid < THREAD_MAX;
+}
+
+static int trap_cause_is_usercopy_recoverable(uint64_t cause)
+{
+    return cause == MCAUSE_LOAD_PAGE_FAULT ||
+           cause == MCAUSE_STORE_PAGE_FAULT;
+}
+
+static void usercopy_probe_clear(tid_t tid)
+{
+    if (!tid_is_valid(tid)) {
+        return;
+    }
+
+    usercopy_probes[tid].active = 0;
+    usercopy_probes[tid].pc_start = 0;
+    usercopy_probes[tid].pc_end = 0;
+    usercopy_probes[tid].fixup_pc = 0;
+    usercopy_probes[tid].user_start = 0;
+    usercopy_probes[tid].user_end = 0;
+    usercopy_probes[tid].fault_cause = 0;
 }
 
 static void tid_queue_init(tid_queue_t *queue)
@@ -616,6 +649,7 @@ static void install_thread(
     threads[tid].arg = arg;
     threads[tid].name = name;
     threads[tid].address_space = NULL;
+    usercopy_probe_clear(tid);
     prepare_initial_trap_frame(&threads[tid]);
 }
 
@@ -644,6 +678,7 @@ void thread_init(void)
         threads[i].entry = NULL;
         threads[i].arg = NULL;
         threads[i].name = NULL;
+        usercopy_probe_clear(i);
     }
 
     current_thread = NULL;
@@ -782,6 +817,80 @@ const thread_t *thread_current(void)
     return current_thread;
 }
 
+int thread_usercopy_probe_begin(
+    uintptr_t pc_start,
+    uintptr_t pc_end,
+    uintptr_t fixup_pc,
+    uintptr_t user_start,
+    uintptr_t user_end,
+    uint64_t fault_cause
+)
+{
+    irq_state_t irq_state = irq_save();
+
+    if (current_thread == NULL ||
+        current_thread->tid == THREAD_NULL_TID ||
+        pc_start >= pc_end ||
+        fixup_pc == 0 ||
+        user_start >= user_end ||
+        !trap_cause_is_usercopy_recoverable(fault_cause)) {
+        irq_restore(irq_state);
+        return -1;
+    }
+
+    usercopy_probe_t *probe = &usercopy_probes[current_thread->tid];
+    if (probe->active) {
+        irq_restore(irq_state);
+        return -1;
+    }
+
+    probe->active = 1;
+    probe->pc_start = pc_start;
+    probe->pc_end = pc_end;
+    probe->fixup_pc = fixup_pc;
+    probe->user_start = user_start;
+    probe->user_end = user_end;
+    probe->fault_cause = fault_cause;
+
+    irq_restore(irq_state);
+    return 0;
+}
+
+void thread_usercopy_probe_end(void)
+{
+    irq_state_t irq_state = irq_save();
+
+    if (current_thread != NULL && current_thread->tid != THREAD_NULL_TID) {
+        usercopy_probe_clear(current_thread->tid);
+    }
+
+    irq_restore(irq_state);
+}
+
+int thread_usercopy_probe_recover(struct trap_frame *frame, uint64_t cause)
+{
+    if (frame == NULL ||
+        current_thread == NULL ||
+        current_thread->tid == THREAD_NULL_TID ||
+        !trap_cause_is_usercopy_recoverable(cause)) {
+        return 0;
+    }
+
+    usercopy_probe_t *probe = &usercopy_probes[current_thread->tid];
+    if (!probe->active ||
+        cause != probe->fault_cause ||
+        frame->mepc < probe->pc_start ||
+        frame->mepc >= probe->pc_end ||
+        frame->mtval < probe->user_start ||
+        frame->mtval >= probe->user_end) {
+        return 0;
+    }
+
+    frame->mepc = probe->fixup_pc;
+    probe->active = 0;
+    return 1;
+}
+
 void thread_on_timer_tick(void)
 {
     if (!threads_started) {
@@ -840,6 +949,7 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
         prev->wake_tick = 0;
         prev->wait_result = WAIT_OK;
         prev->state = THREAD_EXITED;
+        usercopy_probe_clear(prev->tid);
     }
 
     thread_t *next = pick_next_thread();

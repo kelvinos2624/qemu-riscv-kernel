@@ -124,6 +124,10 @@ trap_frame_t *trap_handle(trap_frame_t *frame)
     }
 
     if (!is_interrupt && trap_is_page_fault(cause)) {
+        if (thread_usercopy_probe_recover(frame, cause)) {
+            return frame;
+        }
+
         trap_report_page_fault(frame, cause);
     }
 

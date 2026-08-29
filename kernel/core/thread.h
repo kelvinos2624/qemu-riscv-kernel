@@ -70,6 +70,16 @@ void wait_queue_sleep(wait_queue_t *queue);
 int wait_queue_sleep_timeout(wait_queue_t *queue, uint64_t ticks);
 tid_t wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
+int thread_usercopy_probe_begin(
+    uintptr_t pc_start,
+    uintptr_t pc_end,
+    uintptr_t fixup_pc,
+    uintptr_t user_start,
+    uintptr_t user_end,
+    uint64_t fault_cause
+);
+void thread_usercopy_probe_end(void);
+int thread_usercopy_probe_recover(struct trap_frame *frame, uint64_t cause);
 void thread_on_timer_tick(void);
 struct trap_frame *thread_handle_control_trap_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);

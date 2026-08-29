@@ -1,4 +1,5 @@
 #include "arch/riscv64/irq.h"
+#include "arch/riscv64/csr.h"
 #include "core/kernel.h"
 #include "memory/page_alloc.h"
 #include "memory/vm.h"
@@ -8,6 +9,7 @@
 #define SV39_VPN_BITS 9u
 #define SV39_PPN_SHIFT 10u
 #define SV39_TOP_BIT 38u
+#define SV39_PTE_FLAG_MASK 0x3ffull
 
 static void memory_zero(void *ptr, size_t size)
 {
@@ -52,6 +54,13 @@ static uintptr_t pte_to_pa(pte_t pte)
 static pte_t pa_to_pte(uintptr_t pa, uint64_t flags)
 {
     return ((pte_t)(pa >> 12) << SV39_PPN_SHIFT) | flags;
+}
+
+static void flush_active_address_space(void)
+{
+    if ((csr_read_satp() & SATP_MODE_SV39) != 0) {
+        sfence_vma();
+    }
 }
 
 static size_t vpn_index(uintptr_t va, unsigned int level)
@@ -256,6 +265,7 @@ int vm_map_page(vm_space_t *space, uintptr_t va, uintptr_t pa, uint64_t flags)
     }
 
     *pte = pa_to_pte(pa, flags);
+    flush_active_address_space();
 
     irq_restore(irq_state);
     return VM_OK;
@@ -280,6 +290,7 @@ int vm_unmap_page(vm_space_t *space, uintptr_t va)
 
     /* Empty intermediate page-table reclamation is deferred; see DDR 20. */
     *pte = 0;
+    flush_active_address_space();
 
     irq_restore(irq_state);
     return VM_OK;
@@ -299,4 +310,30 @@ uintptr_t vm_translate(const vm_space_t *space, uintptr_t va)
 
     irq_restore(irq_state);
     return pa;
+}
+
+int vm_get_mapping(
+    const vm_space_t *space,
+    uintptr_t va,
+    uintptr_t *pa,
+    uint64_t *flags
+)
+{
+    if (pa == NULL || flags == NULL) {
+        return VM_ERR_INVALID;
+    }
+
+    irq_state_t irq_state = irq_save();
+
+    pte_t *pte = vm_walk(space, va, 0);
+    if (pte == NULL || !pte_is_valid(*pte) || !pte_is_leaf(*pte)) {
+        irq_restore(irq_state);
+        return VM_ERR_NOT_MAPPED;
+    }
+
+    *pa = pte_to_pa(*pte) | (va & VM_PAGE_OFFSET_MASK);
+    *flags = *pte & SV39_PTE_FLAG_MASK;
+
+    irq_restore(irq_state);
+    return VM_OK;
 }

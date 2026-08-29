@@ -15,6 +15,7 @@
 #define SSTATUS_SIE (1u << 1)
 #define SSTATUS_SPIE (1u << 5)
 #define SSTATUS_SPP (1u << 8)
+#define SSTATUS_SUM (1u << 18)
 #define MIE_MTIE (1u << 7)
 #define SIE_STIE (1u << 5)
 #define MIP_STIP (1u << 5)
