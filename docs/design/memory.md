@@ -259,6 +259,17 @@ addresses. It is not complete ownership tracking: a managed frame may still be
 owned by another kernel subsystem. Callers remain responsible for passing pages
 they actually own until the kernel has frame ownership metadata.
 
+PR8 temporarily maps the first U-mode code and stack pages into the active
+kernel page table with `VM_PTE_U`. This is deliberately scoped to proving the
+U-mode privilege transition and delegated user `ecall`; it does not claim
+separate address-space isolation. The lower user aliases are backed by
+allocator-owned pages and are still also reachable through the kernel's
+identity mapping for setup.
+
+Because the kernel writes the first user program into a data page and then
+executes it, the target ISA includes `zifencei` and the scenario executes
+`fence.i` before entering U-mode.
+
 ## Kernel Paging
 
 The kernel now enables Sv39 and runs normal kernel code in S-mode under an
@@ -365,6 +376,14 @@ The user-space scenario verifies:
 - `vm_space_destroy()` refuses live leaf mappings
 - unmap/free/destroy restores the starting free-page count
 
+The first-user scenario verifies:
+
+- a tiny linked user program is copied into a user-executable page
+- the initial U-mode stack pointer is the top of the user stack page
+- `sret` enters U-mode
+- U-mode `ecall` traps back to S-mode
+- the exit syscall path returns to a kernel continuation
+
 The QEMU smoke test checks for:
 
 ```text
@@ -373,4 +392,5 @@ milestone 12: kernel heap
 milestone 13: sv39 page table primitives
 trap: page fault access=load
 milestone 14: user address space skeleton
+milestone 15: first user task
 ```

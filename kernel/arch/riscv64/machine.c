@@ -32,6 +32,7 @@ void machine_init(void)
         (1ull << MCAUSE_BREAKPOINT) |
         (1ull << MCAUSE_LOAD_ACCESS_FAULT) |
         (1ull << MCAUSE_STORE_ACCESS_FAULT) |
+        (1ull << MCAUSE_ECALL_U_MODE) |
         (1ull << MCAUSE_INSTRUCTION_PAGE_FAULT) |
         (1ull << MCAUSE_LOAD_PAGE_FAULT) |
         (1ull << MCAUSE_STORE_PAGE_FAULT);

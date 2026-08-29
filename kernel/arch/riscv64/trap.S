@@ -42,6 +42,10 @@
 
 .balign 4
 trap_entry:
+    csrrw sp, sscratch, sp
+    bnez sp, trap_entry_from_user
+
+    csrrw sp, sscratch, sp
     addi sp, sp, -TF_SIZE
 
     sd ra, TF_RA(sp)
@@ -76,7 +80,46 @@ trap_entry:
     sd t4, TF_T4(sp)
     sd t5, TF_T5(sp)
     sd t6, TF_T6(sp)
+    j trap_entry_save_csrs
 
+trap_entry_from_user:
+    addi sp, sp, -TF_SIZE
+
+    sd ra, TF_RA(sp)
+    sd t0, TF_T0(sp)
+    csrr t0, sscratch
+    sd t0, TF_SP(sp)
+    csrw sscratch, zero
+    sd gp, TF_GP(sp)
+    sd tp, TF_TP(sp)
+    sd t1, TF_T1(sp)
+    sd t2, TF_T2(sp)
+    sd s0, TF_S0(sp)
+    sd s1, TF_S1(sp)
+    sd a0, TF_A0(sp)
+    sd a1, TF_A1(sp)
+    sd a2, TF_A2(sp)
+    sd a3, TF_A3(sp)
+    sd a4, TF_A4(sp)
+    sd a5, TF_A5(sp)
+    sd a6, TF_A6(sp)
+    sd a7, TF_A7(sp)
+    sd s2, TF_S2(sp)
+    sd s3, TF_S3(sp)
+    sd s4, TF_S4(sp)
+    sd s5, TF_S5(sp)
+    sd s6, TF_S6(sp)
+    sd s7, TF_S7(sp)
+    sd s8, TF_S8(sp)
+    sd s9, TF_S9(sp)
+    sd s10, TF_S10(sp)
+    sd s11, TF_S11(sp)
+    sd t3, TF_T3(sp)
+    sd t4, TF_T4(sp)
+    sd t5, TF_T5(sp)
+    sd t6, TF_T6(sp)
+
+trap_entry_save_csrs:
     csrr t0, sepc
     sd t0, TF_MEPC(sp)
     csrr t0, sstatus
@@ -94,6 +137,16 @@ trap_restore_frame:
     ld t0, TF_MEPC(sp)
     csrw sepc, t0
     ld t0, TF_MSTATUS(sp)
+    andi t1, t0, 0x100
+    bnez t1, trap_restore_supervisor
+    addi t1, sp, TF_SIZE
+    csrw sscratch, t1
+    j trap_restore_status
+
+trap_restore_supervisor:
+    csrw sscratch, zero
+
+trap_restore_status:
     csrw sstatus, t0
 
     ld ra, TF_RA(sp)

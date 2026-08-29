@@ -89,3 +89,8 @@ uint64_t paging_init_kernel(void)
 
     return SATP_MODE_SV39 | ((uint64_t)(uintptr_t)kernel_space.root >> 12);
 }
+
+vm_space_t *paging_kernel_space(void)
+{
+    return &kernel_space;
+}
