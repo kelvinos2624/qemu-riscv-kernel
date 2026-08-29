@@ -103,6 +103,45 @@ static void rollback_allocated_tables(
     }
 }
 
+static int table_contains_leaf(const pte_t *table, unsigned int level)
+{
+    for (size_t i = 0; i < SV39_ENTRIES_PER_TABLE; i++) {
+        const pte_t pte = table[i];
+        if (!pte_is_valid(pte)) {
+            continue;
+        }
+
+        if (pte_is_leaf(pte) || level == 0) {
+            return 1;
+        }
+
+        if (table_contains_leaf((const pte_t *)pte_to_pa(pte), level - 1u)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static void free_empty_table_children(pte_t *table, unsigned int level)
+{
+    if (level == 0) {
+        return;
+    }
+
+    for (size_t i = 0; i < SV39_ENTRIES_PER_TABLE; i++) {
+        const pte_t pte = table[i];
+        if (!pte_is_valid(pte)) {
+            continue;
+        }
+
+        pte_t *child = (pte_t *)pte_to_pa(pte);
+        free_empty_table_children(child, level - 1u);
+        page_free(child);
+        table[i] = 0;
+    }
+}
+
 int vm_space_init(vm_space_t *space)
 {
     if (space == NULL) {
@@ -119,6 +158,27 @@ int vm_space_init(vm_space_t *space)
 
     memory_zero(root, PAGE_SIZE);
     space->root = root;
+
+    irq_restore(irq_state);
+    return VM_OK;
+}
+
+int vm_space_destroy(vm_space_t *space)
+{
+    if (space == NULL || space->root == NULL) {
+        return VM_ERR_INVALID;
+    }
+
+    irq_state_t irq_state = irq_save();
+
+    if (table_contains_leaf(space->root, SV39_LEVELS - 1u)) {
+        irq_restore(irq_state);
+        return VM_ERR_BUSY;
+    }
+
+    free_empty_table_children(space->root, SV39_LEVELS - 1u);
+    page_free(space->root);
+    space->root = NULL;
 
     irq_restore(irq_state);
     return VM_OK;

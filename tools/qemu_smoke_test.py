@@ -43,6 +43,15 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "page fault diagnostic scenario",
     },
+    "user-space": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: user-space",
+            "milestone 14: user address space skeleton",
+        ],
+        "required_trace_types": [],
+        "success": "user address space skeleton scenario",
+    },
     "scheduler-sync": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -78,6 +87,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 11:")
         or line.startswith("milestone 12:")
         or line.startswith("milestone 13:")
+        or line.startswith("milestone 14:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("trace:")

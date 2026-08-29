@@ -618,6 +618,7 @@ static void install_thread(
     threads[tid].entry = entry;
     threads[tid].arg = arg;
     threads[tid].name = name;
+    threads[tid].address_space = NULL;
     prepare_initial_trap_frame(&threads[tid]);
 }
 
@@ -636,6 +637,7 @@ void thread_init(void)
         threads[i].wait_queue = NULL;
         threads[i].kernel_sp = 0;
         threads[i].trap_frame = NULL;
+        threads[i].address_space = NULL;
         threads[i].quantum_ticks = 0;
         threads[i].in_ready_queue = 0;
         threads[i].in_sleep_queue = 0;

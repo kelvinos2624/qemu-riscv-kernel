@@ -5,6 +5,7 @@
 #include "core/trace.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
+#include "memory/user_space.h"
 #include "memory/vm.h"
 
 #ifndef CONFIG_SCENARIO
@@ -19,6 +20,7 @@ static void scenario_allocator(void) __attribute__((noreturn));
 static void scenario_heap(void) __attribute__((noreturn));
 static void scenario_vm(void) __attribute__((noreturn));
 static void scenario_page_fault(void) __attribute__((noreturn));
+static void scenario_user_space(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 
 static int page_is_aligned(const void *page)
@@ -374,6 +376,104 @@ static void scenario_page_fault(void)
     PANIC("page fault scenario returned from unmapped load");
 }
 
+static void scenario_user_space(void)
+{
+    console_write("scenario: user-space\n");
+
+    const size_t initial_free = page_free_count();
+
+    vm_space_t space;
+    if (vm_space_init(&space) != VM_OK || space.root == NULL) {
+        PANIC("user vm space init failed");
+    }
+
+    void *code_page = page_alloc();
+    void *stack_page = page_alloc();
+    if (code_page == NULL || stack_page == NULL) {
+        PANIC("user backing page allocation failed");
+    }
+
+    if (user_space_map_code_page(&space, (uintptr_t)code_page) != VM_OK) {
+        PANIC("user code map failed");
+    }
+    if (user_space_map_stack_page(&space, (uintptr_t)stack_page) != VM_OK) {
+        PANIC("user stack map failed");
+    }
+    if (vm_translate(&space, USER_SPACE_CODE_BASE) != (uintptr_t)code_page) {
+        PANIC("user code translate failed");
+    }
+    if (vm_translate(&space, USER_SPACE_STACK_BASE) != (uintptr_t)stack_page) {
+        PANIC("user stack translate failed");
+    }
+
+    const uint64_t user_rw = VM_PTE_V | VM_PTE_R | VM_PTE_W | VM_PTE_U;
+    if (user_space_map_page(&space, 0, (uintptr_t)code_page, user_rw) !=
+        VM_ERR_INVALID) {
+        PANIC("user null guard accepted");
+    }
+    if (user_space_map_page(
+            &space,
+            USER_SPACE_CODE_BASE + PAGE_SIZE,
+            (uintptr_t)code_page,
+            VM_PTE_V | VM_PTE_R | VM_PTE_W
+        ) != VM_ERR_INVALID) {
+        PANIC("user map without U accepted");
+    }
+    if (user_space_map_page(
+            &space,
+            0x0000000010000000ull,
+            (uintptr_t)code_page,
+            user_rw
+        ) != VM_ERR_INVALID) {
+        PANIC("user mmio-looking va accepted");
+    }
+    if (user_space_map_page(
+            &space,
+            USER_SPACE_CODE_BASE + PAGE_SIZE,
+            0x0000000010000000ull,
+            user_rw
+        ) != VM_ERR_INVALID) {
+        PANIC("user non-managed pa accepted");
+    }
+    if (user_space_map_page(
+            &space,
+            USER_SPACE_CODE_BASE + PAGE_SIZE,
+            (uintptr_t)code_page,
+            user_rw | VM_PTE_G
+        ) != VM_ERR_INVALID) {
+        PANIC("user global mapping accepted");
+    }
+    if (vm_space_destroy(&space) != VM_ERR_BUSY) {
+        PANIC("busy user vm space destroy accepted");
+    }
+
+    if (vm_unmap_page(&space, USER_SPACE_CODE_BASE) != VM_OK ||
+        vm_unmap_page(&space, USER_SPACE_STACK_BASE) != VM_OK) {
+        PANIC("user unmap failed");
+    }
+
+    page_free(code_page);
+    page_free(stack_page);
+
+    if (vm_space_destroy(&space) != VM_OK || space.root != NULL) {
+        PANIC("user vm space destroy failed");
+    }
+    if (page_free_count() != initial_free) {
+        PANIC("user vm space leaked pages");
+    }
+
+    console_write("user: code=");
+    console_write_hex64(USER_SPACE_CODE_BASE);
+    console_write(" stack=");
+    console_write_hex64(USER_SPACE_STACK_BASE);
+    console_write(" top=");
+    console_write_hex64(USER_SPACE_TOP);
+    console_write("\n");
+    console_write("milestone 14: user address space skeleton\n");
+
+    scenario_idle_forever();
+}
+
 static void demo_thread_a(void *arg)
 {
     (void)arg;
@@ -450,6 +550,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_PAGE_FAULT) {
         scenario_page_fault();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_USER_SPACE) {
+        scenario_user_space();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {

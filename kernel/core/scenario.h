@@ -5,7 +5,8 @@
 #define SCENARIO_HEAP 2
 #define SCENARIO_VM 3
 #define SCENARIO_PAGE_FAULT 4
-#define SCENARIO_SCHEDULER_SYNC 5
+#define SCENARIO_USER_SPACE 5
+#define SCENARIO_SCHEDULER_SYNC 6
 
 void scenario_run(void) __attribute__((noreturn));
 
