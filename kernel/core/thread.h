@@ -13,6 +13,7 @@
 
 typedef uint16_t tid_t;
 struct trap_frame;
+struct vm_space;
 
 typedef struct wait_queue {
     tid_t tids[THREAD_MAX - 1];
@@ -44,6 +45,7 @@ typedef struct thread {
     wait_queue_t *wait_queue;
     uintptr_t kernel_sp;
     struct trap_frame *trap_frame;
+    struct vm_space *address_space;
     uint16_t quantum_ticks;
     uint8_t in_ready_queue;
     uint8_t in_sleep_queue;

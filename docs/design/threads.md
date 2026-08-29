@@ -10,8 +10,8 @@ threads. It also supports FIFO wait queues for blocking on kernel-owned events
 and timeout-aware event waits.
 
 All threads currently run as S-mode kernel threads under the shared identity
-kernel page table. They are not user tasks: there is no user stack, per-process
-page-table switch, or user syscall boundary yet.
+kernel page table. They are not user tasks: there is no user trap return or
+user syscall boundary yet.
 
 ## Public API
 
@@ -83,6 +83,7 @@ Each TCB tracks blocked-state metadata and explicit queue membership:
 - `in_ready_queue`: whether the TID is in the ready queue
 - `in_sleep_queue`: whether the TID is in the timeout queue
 - `in_wait_queue`: whether the TID is in an event wait queue
+- `address_space`: nullable placeholder for a future user address space
 
 Timed waits may be linked into both the sleep queue and a wait queue. This is
 why the older single queue-owner enum was replaced by explicit membership
@@ -284,6 +285,16 @@ Thread states for this milestone:
 
 Mutex ownership and mutex timeout policy are implemented in `kernel/core/sync.c`.
 
+## Address-Space Placeholder
+
+Each TCB now has a nullable `address_space` pointer. The field is deliberately
+inert in this milestone: scheduler paths do not switch `satp`, do not change
+TLB state, and do not interpret the field as process ownership.
+
+The placeholder records where PR8 can attach a user address space when the
+kernel adds U-mode entry. Until then, all scheduled threads still execute as
+S-mode kernel threads on the shared identity-mapped kernel page table.
+
 ## Interrupt Safety
 
 Scheduler state mutations are protected with `irq_save()` and `irq_restore()`.
@@ -306,6 +317,6 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Add per-thread address-space state when user tasks arrive.
+- Use the per-thread address-space placeholder when user tasks arrive.
 - Add priority scheduling as a future scheduling extension if priority-inversion
   experiments become a goal.

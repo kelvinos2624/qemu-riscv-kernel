@@ -9,11 +9,10 @@ then lazily subdivides some of those frames into smaller size-class pools for
 kernel objects. The Sv39 page-table layer builds software-managed address spaces
 from those same physical frames.
 
-The kernel still runs with address translation disabled, so returned page,
-heap, and page-table addresses are currently identity-mapped machine addresses
-that C code can use directly as pointers. Later virtual-memory work may wrap
-physical-frame values in a physical-address type once virtual and physical
-addresses are no longer interchangeable.
+The kernel runs under an identity-mapped Sv39 page table, so returned page,
+heap, and page-table addresses are still usable as C pointers in S-mode. Later
+virtual-memory work may wrap physical-frame values in a physical-address type
+once virtual and physical addresses are no longer interchangeable.
 
 ## RAM Bounds
 
@@ -174,6 +173,7 @@ The virtual-memory layer exposes:
 
 ```c
 int vm_space_init(vm_space_t *space);
+int vm_space_destroy(vm_space_t *space);
 int vm_map_page(vm_space_t *space, uintptr_t va, uintptr_t pa, uint64_t flags);
 int vm_unmap_page(vm_space_t *space, uintptr_t va);
 uintptr_t vm_translate(const vm_space_t *space, uintptr_t va);
@@ -209,6 +209,55 @@ Failed `vm_map_page()` calls are not allowed to retain newly allocated
 intermediate page-table pages. If a sparse mapping allocates part of a fresh
 branch and then runs out of physical pages, the walker clears the PTEs it
 installed during that call and returns those pages to `page_alloc()`.
+
+`vm_space_destroy()` reclaims page-table structure pages only. It first scans
+the tree and refuses destruction with `VM_ERR_BUSY` if any valid leaf mapping is
+still present. This keeps physical-frame ownership outside the generic VM layer:
+callers must unmap leaf pages and release any frames they own before destroying
+the translation structure.
+
+Destroying an already-empty address space frees intermediate page-table pages
+with a post-order walk, frees the root page, and clears `space->root`.
+
+## User Address-Space Skeleton
+
+The user-address-space layer is a small policy module over `vm_space_t`, not a
+separate process or address-space object. `vm.c` remains the generic Sv39
+mechanism; `user_space.c` owns the current user mapping policy.
+
+The initial sparse user layout is:
+
+```text
+0x0000000000000000 - 0x0000000000000fff   null guard, unmapped
+0x0000000000001000                         first user code page
+...
+0x000000003ffff000                         initial user stack page
+0x0000000040000000                         user stack top / user top
+```
+
+The skeleton maps only one code page and one stack page today. The larger
+sparse range preserves a realistic code-low/stack-high mental model for PR8
+without requiring a full loader, heap, or process layout.
+
+User mapping helpers enforce:
+
+- virtual address is page-sized and inside the user range
+- virtual address does not overlap the current QEMU `virt` CLINT or UART MMIO
+  holes
+- physical address is inside allocator-managed RAM
+- `VM_PTE_U` is present
+- `VM_PTE_G` is absent
+
+The MMIO virtual-address holes are a temporary QEMU `virt` layout guard. They
+avoid confusing user VAs that visually overlap the identity-mapped kernel MMIO
+layout. The longer-term isolation invariant is physical ownership: users should
+not be able to map kernel-owned or device-owned frames unless a later kernel API
+grants that access explicitly.
+
+The managed-RAM PA check rejects obvious kernel-image, CLINT, and UART physical
+addresses. It is not complete ownership tracking: a managed frame may still be
+owned by another kernel subsystem. Callers remain responsible for passing pages
+they actually own until the kernel has frame ownership metadata.
 
 ## Kernel Paging
 
@@ -305,6 +354,17 @@ The page-fault scenario verifies:
 - the trap path identifies the fault as a load page fault
 - the diagnostic includes the trap CSRs and current execution context
 
+The user-space scenario verifies:
+
+- code and stack pages can be mapped through user-space policy helpers
+- the null guard is rejected
+- missing `VM_PTE_U` is rejected
+- QEMU `virt` MMIO-looking user VAs are rejected
+- physical addresses outside managed RAM are rejected
+- global user mappings are rejected
+- `vm_space_destroy()` refuses live leaf mappings
+- unmap/free/destroy restores the starting free-page count
+
 The QEMU smoke test checks for:
 
 ```text
@@ -312,4 +372,5 @@ milestone 11: physical page allocator
 milestone 12: kernel heap
 milestone 13: sv39 page table primitives
 trap: page fault access=load
+milestone 14: user address space skeleton
 ```
