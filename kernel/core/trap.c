@@ -3,6 +3,7 @@
 #include "core/thread.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
+#include "user/syscall.h"
 
 #include <stddef.h>
 
@@ -108,6 +109,18 @@ trap_frame_t *trap_handle(trap_frame_t *frame)
     if (is_interrupt && cause == SCAUSE_SUPERVISOR_TIMER_INTERRUPT) {
         timer_handle_interrupt();
         return thread_maybe_preempt_from_trap(frame);
+    }
+
+    if (!is_interrupt && cause == MCAUSE_ECALL_U_MODE) {
+        if (user_syscall_handle(frame) == 0) {
+            return frame;
+        }
+
+        console_write("\ntrap: unknown user ecall ");
+        trap_print_field("syscall", frame->a7);
+        trap_print_field("sepc", frame->mepc);
+        console_write("\n");
+        PANIC("unknown user syscall");
     }
 
     if (!is_interrupt && trap_is_page_fault(cause)) {

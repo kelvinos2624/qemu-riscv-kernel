@@ -52,6 +52,17 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "user address space skeleton scenario",
     },
+    "first-user": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: first-user",
+            "user: entering u-mode",
+            "user: exited code=",
+            "milestone 15: first user task",
+        ],
+        "required_trace_types": [],
+        "success": "first user task scenario",
+    },
     "scheduler-sync": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -88,8 +99,11 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 12:")
         or line.startswith("milestone 13:")
         or line.startswith("milestone 14:")
+        or line.startswith("milestone 15:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
+        or line.startswith("user: entering u-mode")
+        or line.startswith("user: exited code=")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
     )
@@ -168,6 +182,10 @@ def main() -> int:
                                 sequence_line = "trace: begin"
                             elif stripped_line.startswith("trap: page fault"):
                                 sequence_line = stripped_line.split(" scause=", 1)[0]
+                            elif stripped_line.startswith("user: entering u-mode"):
+                                sequence_line = "user: entering u-mode"
+                            elif stripped_line.startswith("user: exited code="):
+                                sequence_line = "user: exited code="
                             else:
                                 sequence_line = stripped_line
 

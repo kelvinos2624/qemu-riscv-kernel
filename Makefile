@@ -11,10 +11,10 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space scheduler-sync
+SCENARIOS := allocator heap vm page-fault user-space first-user scheduler-sync
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter scheduler-sync,$(SCENARIO)),6,))))))
+CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter first-user,$(SCENARIO)),6,$(if $(filter scheduler-sync,$(SCENARIO)),7,)))))))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
@@ -27,7 +27,7 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 KERNEL_MAP := $(BUILD_DIR)/kernel.map
 CONFIG_STAMP := $(BUILD_DIR)/.config.stamp
 
-ARCH_CFLAGS := -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany
+ARCH_CFLAGS := -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
 COMMON_CFLAGS := -ffreestanding -fno-common -fno-builtin -fno-stack-protector
 COMMON_CFLAGS += -Wall -Wextra -Werror -O2 -g
 COMMON_CFLAGS += -DCONFIG_TRACE=$(CONFIG_TRACE)
@@ -54,7 +54,9 @@ KERNEL_SRCS := \
 	kernel/memory/vm.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \
-	kernel/drivers/uart.c
+	kernel/drivers/uart.c \
+	kernel/user/first_user.S \
+	kernel/user/syscall.c
 
 KERNEL_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(KERNEL_SRCS)))
 KERNEL_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(KERNEL_SRCS)))

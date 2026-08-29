@@ -105,9 +105,9 @@ prevents obvious kernel-image and MMIO mappings, but it is not complete frame
 ownership tracking. Until ownership metadata exists, callers must pass frames
 they allocated or otherwise own.
 
-The new `thread_t.address_space` field is a placeholder only. PR8 must decide
-how U-mode entry, trap return, `satp` switching, and TLB flushing interact with
-the scheduler.
+The new `thread_t.address_space` field is a placeholder only. DDR 24 records
+the first U-mode transition choice: prove privilege crossing before wiring the
+scheduler to separate user `satp` values.
 
 ## ECE350 and STM32 RTOS Connection
 

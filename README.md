@@ -48,14 +48,15 @@ The project is designed to show practical understanding of:
 - Architecture: RISC-V 64-bit
 - Machine: QEMU `virt`
 - Initial privilege mode: machine mode bootstrap, supervisor mode kernel
-- ISA baseline: `rv64imac_zicsr`
+- ISA baseline: `rv64imac_zicsr_zifencei`
 - Firmware: none, using QEMU `-bios none`
 - Kernel load address: `0x80000000`
 - Console: QEMU `virt` 16550 UART at `0x10000000`
 
 Machine mode is used as a minimal bootstrap and platform shim. Normal kernel
-execution runs in supervisor mode under an identity-mapped Sv39 page table.
-Userspace isolation remains a later milestone.
+execution runs in supervisor mode under an identity-mapped Sv39 page table and
+can enter a minimal U-mode task. Separate user `satp` switching remains a later
+milestone.
 
 ## Current Status
 
@@ -144,9 +145,13 @@ Virtual memory and allocation setup has begun:
 - nullable per-thread address-space placeholder for future U-mode tasks
 - page-table structure teardown through `vm_space_destroy()`
 - documented separation between page-table ownership and mapped-frame ownership
+- general S-mode trap entry support for user-origin traps through `sscratch`
+- first U-mode task entered with `sret`
+- minimal U-mode `exit` syscall path through delegated user `ecall`
+- temporary first-user mappings in the active kernel page table
 
-The next memory milestones are entering U-mode, syscall/trap return, and safe
-usercopy with recoverable fault probes.
+The next memory milestones are separate user address-space switching, syscall
+ABI growth, and safe usercopy with recoverable fault probes.
 
 Common boot output:
 
@@ -201,6 +206,15 @@ User-space scenario output:
 scenario: user-space
 user: code=0x0000000000001000 stack=0x000000003ffff000 top=0x0000000040000000
 milestone 14: user address space skeleton
+```
+
+First-user scenario output:
+
+```text
+scenario: first-user
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000
+user: exited code=0x0000000000000000
+milestone 15: first user task
 ```
 
 Scheduler/synchronization scenario output:
@@ -349,6 +363,7 @@ make test SCENARIO=heap
 make test SCENARIO=vm
 make test SCENARIO=page-fault
 make test SCENARIO=user-space
+make test SCENARIO=first-user
 make test SCENARIO=scheduler-sync
 ```
 
@@ -363,6 +378,7 @@ make test SCENARIO=heap
 make test SCENARIO=vm
 make test SCENARIO=page-fault
 make test SCENARIO=user-space
+make test SCENARIO=first-user
 make clean
 make toolcheck
 ```
@@ -394,6 +410,7 @@ The current scenarios are:
   load
 - `user-space`: validates user mapping policy, sparse layout constants, and
   address-space teardown rules
+- `first-user`: validates `sret` into U-mode and delegated user `ecall` exit
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
 
@@ -402,11 +419,12 @@ self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
 VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
 the common boot path reaches S-mode with Sv39 enabled, an unmapped load produces
 a load page-fault diagnostic, user-space mappings reject invalid VA/PA/flag
-combinations and restore page counts after teardown, one thread times out while
-waiting for a mutex, the idle task runs while all real threads are blocked, a
-later thread can still acquire the mutex after the owner unlocks, and the trace
-dump includes key events such as context switches, idle entry, wait timeout, and
-mutex timeout.
+combinations and restore page counts after teardown, the kernel enters one
+U-mode task and handles its exit syscall, one thread times out while waiting for
+a mutex, the idle task runs while all real threads are blocked, a later thread
+can still acquire the mutex after the owner unlocks, and the trace dump includes
+key events such as context switches, idle entry, wait timeout, and mutex
+timeout.
 
 Planned test categories:
 

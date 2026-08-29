@@ -1,10 +1,13 @@
+#include "arch/riscv64/csr.h"
 #include "core/kernel.h"
 #include "core/scenario.h"
 #include "core/sync.h"
 #include "core/thread.h"
 #include "core/trace.h"
+#include "core/trap.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
+#include "memory/paging.h"
 #include "memory/user_space.h"
 #include "memory/vm.h"
 
@@ -21,7 +24,11 @@ static void scenario_heap(void) __attribute__((noreturn));
 static void scenario_vm(void) __attribute__((noreturn));
 static void scenario_page_fault(void) __attribute__((noreturn));
 static void scenario_user_space(void) __attribute__((noreturn));
+static void scenario_first_user(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
+
+extern char first_user_start[];
+extern char first_user_end[];
 
 static int page_is_aligned(const void *page)
 {
@@ -31,6 +38,23 @@ static int page_is_aligned(const void *page)
 static int pointer_is_aligned(const void *ptr, uintptr_t alignment)
 {
     return (((uintptr_t)ptr & (alignment - 1u)) == 0);
+}
+
+static void memory_copy(void *dst, const void *src, size_t size)
+{
+    uint8_t *dst_bytes = dst;
+    const uint8_t *src_bytes = src;
+    for (size_t i = 0; i < size; i++) {
+        dst_bytes[i] = src_bytes[i];
+    }
+}
+
+static void memory_zero(void *ptr, size_t size)
+{
+    uint8_t *bytes = ptr;
+    for (size_t i = 0; i < size; i++) {
+        bytes[i] = 0;
+    }
 }
 
 static void scenario_idle_forever(void)
@@ -474,6 +498,54 @@ static void scenario_user_space(void)
     scenario_idle_forever();
 }
 
+static void scenario_first_user(void)
+{
+    console_write("scenario: first-user\n");
+
+    const size_t user_program_size =
+        (size_t)(first_user_end - first_user_start);
+    if (user_program_size == 0 || user_program_size > PAGE_SIZE) {
+        PANIC("invalid first user program size");
+    }
+
+    uint8_t *code_page = page_alloc();
+    uint8_t *stack_page = page_alloc();
+    uint8_t *trap_stack_page = page_alloc();
+    if (code_page == NULL || stack_page == NULL || trap_stack_page == NULL) {
+        PANIC("first user page allocation failed");
+    }
+
+    memory_zero(code_page, PAGE_SIZE);
+    memory_zero(stack_page, PAGE_SIZE);
+    memory_zero(trap_stack_page, PAGE_SIZE);
+    memory_copy(code_page, first_user_start, user_program_size);
+    __asm__ volatile("fence.i" : : : "memory");
+
+    vm_space_t *kernel_space = paging_kernel_space();
+    if (user_space_map_code_page(kernel_space, (uintptr_t)code_page) != VM_OK) {
+        PANIC("first user code map failed");
+    }
+    if (user_space_map_stack_page(kernel_space, (uintptr_t)stack_page) != VM_OK) {
+        PANIC("first user stack map failed");
+    }
+
+    trap_frame_t *frame = (trap_frame_t *)(
+        (uintptr_t)trap_stack_page + PAGE_SIZE - TRAP_FRAME_STACK_SIZE
+    );
+    memory_zero(frame, TRAP_FRAME_STACK_SIZE);
+    frame->sp = USER_SPACE_STACK_TOP;
+    frame->mepc = USER_SPACE_CODE_BASE;
+    frame->mstatus = SSTATUS_SPIE;
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write("\n");
+
+    trap_restore(frame);
+}
+
 static void demo_thread_a(void *arg)
 {
     (void)arg;
@@ -554,6 +626,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_USER_SPACE) {
         scenario_user_space();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_FIRST_USER) {
+        scenario_first_user();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {

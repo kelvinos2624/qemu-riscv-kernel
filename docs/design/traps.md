@@ -88,12 +88,50 @@ copy site, and return an error instead of panicking.
 Unexpected S-mode traps still print CSR diagnostics and panic. Unexpected M-mode
 traps also panic, because the M-mode shim has no recovery policy of its own.
 
+## User Trap Entry
+
+The same `trap_entry` handles S-mode and U-mode origins. While the kernel is
+executing in S-mode, `sscratch` is kept at zero. While entering U-mode,
+`sscratch` holds the top of a kernel-owned trap stack.
+
+On trap entry, assembly swaps `sp` with `sscratch`:
+
+- if the new `sp` is zero, the trap came from S-mode and the old S-mode stack is
+  restored before saving the frame
+- if the new `sp` is nonzero, the trap came from U-mode and the frame is saved
+  on the kernel trap stack
+
+This preserves the key boundary invariant: U-mode executes on a user stack, but
+S-mode never saves privileged trap frames onto that user stack.
+
+The restore path also owns the `sscratch` invariant. If a frame will return to
+U-mode, restore reloads `sscratch` with the kernel trap-stack top derived from
+the frame location. If a frame will return to S-mode, restore clears
+`sscratch`.
+
+PR8 intentionally uses temporary user mappings in the active kernel page table.
+This proves the privilege transition and U-mode trap return without also
+solving separate user `satp` switching or a trampoline page.
+
+## User Syscall Exit
+
+M-mode delegates U-mode `ecall` to S-mode. S-mode `ecall` is still reserved for
+the M-mode timer shim.
+
+The first syscall path recognizes only `USER_SYSCALL_EXIT`. The helper records
+the user exit code, rewrites the saved trap frame to return to an S-mode kernel
+continuation, and the continuation prints the first-user milestone. Unknown
+user syscalls panic.
+
+This is not a full syscall ABI. It is the smallest modern-OS-shaped mechanism
+needed to prove that U-mode can intentionally return control to the kernel.
+
 ## ECE350 and STM32 RTOS Connection
 
 This follows the ECE350 distinction between hardware traps and OS policy:
 hardware transfers control to a privileged handler, but the kernel decides what
-the event means. Page faults are now decoded as a specific hardware exception,
-but the recovery policy is intentionally deferred.
+the event means. Page faults are decoded as a specific hardware exception, and
+U-mode `ecall` is decoded as the first user/kernel request boundary.
 
 The timer/preemption path mirrors the STM32 RTOS SysTick/PendSV split. The
 timer creates a controlled scheduling point, while the actual context switch
@@ -108,5 +146,6 @@ the broken invariant.
 ## Next Work
 
 - Add recoverable usercopy fault probes once U-mode and user mappings exist.
-- Replace the kernel-only control trap path with real user syscalls once U-mode
-  exists.
+- Move user execution to a separate user page table with explicit `satp`
+  switching or a trampoline.
+- Grow the syscall ABI beyond first-user exit.

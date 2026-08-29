@@ -287,13 +287,14 @@ Mutex ownership and mutex timeout policy are implemented in `kernel/core/sync.c`
 
 ## Address-Space Placeholder
 
-Each TCB now has a nullable `address_space` pointer. The field is deliberately
-inert in this milestone: scheduler paths do not switch `satp`, do not change
-TLB state, and do not interpret the field as process ownership.
+Each TCB has a nullable `address_space` pointer. The field remains deliberately
+inert: scheduler paths do not switch `satp`, do not change TLB state, and do
+not interpret the field as process ownership.
 
-The placeholder records where PR8 can attach a user address space when the
-kernel adds U-mode entry. Until then, all scheduled threads still execute as
-S-mode kernel threads on the shared identity-mapped kernel page table.
+The placeholder records where a later PR can attach a real user address space.
+PR8 proves U-mode entry with temporary user mappings in the active kernel page
+table, so scheduled threads still execute as S-mode kernel threads on the shared
+identity-mapped kernel page table.
 
 ## Interrupt Safety
 

@@ -10,7 +10,6 @@
 #define THREAD_TRAP_SLEEP 3u
 #define THREAD_TRAP_WAIT 4u
 #define THREAD_TRAP_WAIT_TIMEOUT 5u
-#define TRAP_FRAME_STACK_SIZE 288u
 
 typedef struct tid_queue {
     tid_t tids[THREAD_MAX - 1];
@@ -23,8 +22,6 @@ typedef struct sleep_queue {
     tid_t tids[THREAD_MAX - 1];
     uint16_t count;
 } sleep_queue_t;
-
-extern void trap_restore(trap_frame_t *frame) __attribute__((noreturn));
 
 static thread_t threads[THREAD_MAX];
 static uint8_t thread_stacks[THREAD_MAX][THREAD_STACK_SIZE] __attribute__((aligned(16)));
