@@ -3,6 +3,7 @@
 #include "core/kernel.h"
 #include "core/scenario.h"
 #include "core/trap.h"
+#include "drivers/device.h"
 #include "drivers/timer.h"
 #include "memory/heap.h"
 #include "memory/paging.h"
@@ -55,5 +56,7 @@ static void supervisor_main(void)
     console_write("milestone 2: timer interrupt setup\n");
 
     heap_init();
+    device_init();
+    (void)driver_probe_all();
     scenario_run();
 }

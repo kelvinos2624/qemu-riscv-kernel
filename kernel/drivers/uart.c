@@ -1,19 +1,10 @@
 #include "core/kernel.h"
+#include "drivers/mmio.h"
 #include "drivers/uart.h"
 
 #define UART_THR 0
 #define UART_LSR 5
 #define UART_LSR_THRE (1u << 5)
-
-static inline uint8_t mmio_read8(uintptr_t addr)
-{
-    return *(volatile uint8_t *)addr;
-}
-
-static inline void mmio_write8(uintptr_t addr, uint8_t value)
-{
-    *(volatile uint8_t *)addr = value;
-}
 
 void uart_putc(char c)
 {

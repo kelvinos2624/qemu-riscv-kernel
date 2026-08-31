@@ -5,6 +5,9 @@
 #include "core/thread.h"
 #include "core/trace.h"
 #include "core/trap.h"
+#include "drivers/device.h"
+#include "drivers/fake.h"
+#include "drivers/mmio.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
 #include "memory/paging.h"
@@ -28,6 +31,7 @@ static void scenario_user_space(void) __attribute__((noreturn));
 static void scenario_first_user(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
+static void scenario_driver_framework(void) __attribute__((noreturn));
 
 extern char first_user_start[];
 extern char first_user_end[];
@@ -747,6 +751,47 @@ static void scenario_scheduler_sync(void)
     thread_start();
 }
 
+static void scenario_driver_framework(void)
+{
+    console_write("scenario: driver-framework\n");
+
+    device_t *by_name = device_find_by_name(FAKE_DEVICE_NAME);
+    if (by_name == NULL) {
+        PANIC("fake device lookup by name failed");
+    }
+
+    device_t *by_compatible = device_find_by_compatible(FAKE_DEVICE_COMPATIBLE);
+    if (by_compatible != by_name) {
+        PANIC("fake device lookup by compatible failed");
+    }
+
+    if (!device_is_bound(by_name)) {
+        PANIC("fake device did not bind");
+    }
+
+    if (device_driver(by_name) == NULL ||
+        device_driver(by_name)->irq_handler == NULL ||
+        device_irq(by_name) != FAKE_DEVICE_IRQ ||
+        device_mmio_size(by_name) < FAKE_MMIO_SIZE) {
+        PANIC("fake device metadata invalid");
+    }
+
+    const uintptr_t scratch_addr = device_mmio_base(by_name) + FAKE_REG_SCRATCH;
+    mmio_fence_before_device_write();
+    mmio_write32(scratch_addr, 0xa5c35a3cu);
+    const uint32_t scratch = mmio_read32(scratch_addr);
+    mmio_fence_after_device_read();
+    if (scratch != 0xa5c35a3cu) {
+        PANIC("fake device scratch register mismatch");
+    }
+
+    console_write("driver: fake device bound\n");
+    console_write("driver: mmio read/write passed\n");
+    console_write("milestone 17: driver framework\n");
+
+    scenario_idle_forever();
+}
+
 void scenario_run(void)
 {
     if (CONFIG_SCENARIO == SCENARIO_ALLOCATOR) {
@@ -779,6 +824,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_SCHEDULER_SYNC) {
         scenario_scheduler_sync();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_DRIVER_FRAMEWORK) {
+        scenario_driver_framework();
     }
 
     PANIC("unknown kernel scenario");

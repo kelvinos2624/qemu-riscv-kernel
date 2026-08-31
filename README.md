@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[##################--] 90%`
+Progress: `[##################--] 92%`
 
 The kernel currently boots on QEMU `virt` with `-bios none`, builds an
 identity-mapped Sv39 kernel page table, enters S-mode, initializes UART output,
@@ -25,9 +25,9 @@ timeout-aware blocking, structured scheduler tracing, a bitmap physical page
 allocator, a page-backed size-class kernel heap, Sv39 page-table primitives,
 hardware kernel paging, diagnostic S-mode page-fault handling, a minimal
 U-mode task, delegated user `ecall` exit, and safe usercopy with narrowly
-recoverable page-fault probes. The virtual-memory and allocation stage is now
-coherent enough to support the next driver-framework and simulated accelerator
-milestones.
+recoverable page-fault probes. Stage 4 has started with typed MMIO helpers,
+immutable platform device resources, a bounded runtime device registry,
+boot-time built-in driver probing, and a fake driver-framework scenario.
 
 ## Project Goals
 
@@ -155,9 +155,24 @@ Stage 3 virtual memory and allocation foundations are complete:
 - `SSTATUS_SUM` enabled only inside the interrupt-masked copy window
 - cross-page usercopy scenario coverage
 
+Stage 4 driver framework foundations are in progress:
+
+- typed volatile MMIO helpers for 8/16/32/64-bit register access
+- explicit RISC-V fence helpers and semantic driver-ordering wrappers
+- immutable platform resource descriptions supplied by the RISC-V platform
+  layer
+- bounded runtime device registry separate from platform resource facts
+- static built-in driver table with compatible-string probing
+- bind-after-success driver ownership invariant
+- lookup by exact device name and first matching compatible string
+- IRQ metadata and driver callback shape, with dispatch deferred
+- fake platform MMIO resource and stateless fake driver probe
+- driver-framework smoke scenario for binding and MMIO helper behavior
+
 The next memory-related milestones are separate user address-space switching,
-syscall ABI growth, and a less temporary process/runtime model. The next major
-project section is the driver framework and simulated accelerator.
+syscall ABI growth, and a less temporary process/runtime model. The next Stage
+4 milestones are the simulated accelerator register model, descriptor-based
+kernel submission, interrupt-driven completion, and timeout/error handling.
 
 Common boot output:
 
@@ -229,6 +244,15 @@ Usercopy scenario output:
 scenario: usercopy
 usercopy: passed
 milestone 16: safe usercopy
+```
+
+Driver-framework scenario output:
+
+```text
+scenario: driver-framework
+driver: fake device bound
+driver: mmio read/write passed
+milestone 17: driver framework
 ```
 
 Scheduler/synchronization scenario output:
@@ -379,6 +403,7 @@ make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=usercopy
+make test SCENARIO=driver-framework
 make test SCENARIO=scheduler-sync
 ```
 
@@ -395,6 +420,7 @@ make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=usercopy
+make test SCENARIO=driver-framework
 make clean
 make toolcheck
 ```
@@ -431,6 +457,8 @@ The current scenarios are:
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
+- `driver-framework`: validates platform/device/driver boundary separation,
+  boot-time compatible binding, and typed MMIO helper behavior
 
 Stage 3 evidence matrix:
 
@@ -447,6 +475,12 @@ Stage 3 evidence matrix:
 | PR9 | Safe usercopy and recoverable copy faults | `usercopy` | `milestone 16: safe usercopy` | `make test SCENARIO=usercopy` |
 | PR10 | Stage 3 documentation and evidence cleanup | all scenarios | all current scenario markers | `make test` |
 
+Stage 4 evidence matrix:
+
+| PR | Capability | Scenario | Smoke marker | Command |
+| --- | --- | --- | --- | --- |
+| PR1 | MMIO and driver registration foundations | `driver-framework` | `milestone 17: driver framework` | `make test SCENARIO=driver-framework` |
+
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
 VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
@@ -457,8 +491,10 @@ U-mode task and handles its exit syscall, safe usercopy validates ranges before
 copying, cross-page usercopy succeeds, recoverable usercopy faults return an
 error, one thread times out while waiting for a mutex, the idle task runs while
 all real threads are blocked, a later thread can still acquire the mutex after
-the owner unlocks, and the trace dump includes key events such as context
-switches, idle entry, wait timeout, and mutex timeout.
+the owner unlocks, the trace dump includes key events such as context switches,
+idle entry, wait timeout, and mutex timeout, and the driver framework binds a
+fake platform device by compatible string before validating MMIO read/write
+behavior through typed helpers.
 
 Planned test categories:
 

@@ -97,6 +97,17 @@ SCENARIOS = {
         ],
         "success": "scheduler synchronization scenario",
     },
+    "driver-framework": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: driver-framework",
+            "driver: fake device bound",
+            "driver: mmio read/write passed",
+            "milestone 17: driver framework",
+        ],
+        "required_trace_types": [],
+        "success": "driver framework scenario",
+    },
 }
 TIMEOUT_SECONDS = 15.0
 
@@ -111,6 +122,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 14:")
         or line.startswith("milestone 15:")
         or line.startswith("milestone 16:")
+        or line.startswith("milestone 17:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
@@ -118,6 +130,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("usercopy:")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
+        or line.startswith("driver:")
     )
 
 
