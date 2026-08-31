@@ -9,6 +9,7 @@
 #define SCENARIO_FIRST_USER 6
 #define SCENARIO_USERCOPY 7
 #define SCENARIO_SCHEDULER_SYNC 8
+#define SCENARIO_DRIVER_FRAMEWORK 9
 
 void scenario_run(void) __attribute__((noreturn));
 

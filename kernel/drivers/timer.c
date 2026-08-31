@@ -2,15 +2,11 @@
 #include "arch/riscv64/machine.h"
 #include "core/kernel.h"
 #include "core/thread.h"
+#include "drivers/mmio.h"
 #include "drivers/timer.h"
 
 static volatile uint64_t ticks;
 static uint64_t next_compare;
-
-static inline uint64_t mmio_read64(uintptr_t addr)
-{
-    return *(volatile uint64_t *)addr;
-}
 
 static uint64_t timer_read_mtime(void)
 {

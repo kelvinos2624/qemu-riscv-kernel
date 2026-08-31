@@ -1,17 +1,13 @@
 #include "arch/riscv64/csr.h"
 #include "arch/riscv64/machine.h"
 #include "core/kernel.h"
+#include "drivers/mmio.h"
 #include "drivers/timer.h"
 
 #define MACHINE_ECALL_SET_TIMER 1u
 #define PMP_ALL_MEMORY_NAPOT UINT64_MAX
 
 extern void machine_trap_entry(void);
-
-static inline void mmio_write64(uintptr_t addr, uint64_t value)
-{
-    *(volatile uint64_t *)addr = value;
-}
 
 static void machine_write_mtimecmp(uint64_t value)
 {

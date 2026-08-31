@@ -24,12 +24,14 @@ SECTIONS
     .rodata : ALIGN(4K) {
         PROVIDE(__rodata_start = .);
         *(.rodata .rodata.*)
+        *(.srodata .srodata.*)
         PROVIDE(__rodata_end = .);
     }
 
     .data : ALIGN(4K) {
         PROVIDE(__data_start = .);
         *(.data .data.*)
+        *(.sdata .sdata.*)
         PROVIDE(__data_end = .);
     }
 

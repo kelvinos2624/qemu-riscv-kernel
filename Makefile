@@ -11,10 +11,10 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync
+SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync driver-framework
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter first-user,$(SCENARIO)),6,$(if $(filter usercopy,$(SCENARIO)),7,$(if $(filter scheduler-sync,$(SCENARIO)),8,))))))))
+CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter first-user,$(SCENARIO)),6,$(if $(filter usercopy,$(SCENARIO)),7,$(if $(filter scheduler-sync,$(SCENARIO)),8,$(if $(filter driver-framework,$(SCENARIO)),9,)))))))))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
@@ -40,6 +40,7 @@ KERNEL_SRCS := \
 	kernel/arch/riscv64/boot.S \
 	kernel/arch/riscv64/context.S \
 	kernel/arch/riscv64/machine.c \
+	kernel/arch/riscv64/platform.c \
 	kernel/arch/riscv64/trap.S \
 	kernel/arch/riscv64/usercopy.S \
 	kernel/core/main.c \
@@ -56,6 +57,8 @@ KERNEL_SRCS := \
 	kernel/memory/vm.c \
 	kernel/core/trap.c \
 	kernel/drivers/timer.c \
+	kernel/drivers/device.c \
+	kernel/drivers/fake.c \
 	kernel/drivers/uart.c \
 	kernel/user/first_user.S \
 	kernel/user/syscall.c
