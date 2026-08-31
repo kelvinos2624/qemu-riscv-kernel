@@ -321,6 +321,60 @@ The current implementation supports cross-page copies. It does not yet validate
 against a per-process page table because separate user address spaces are not
 active yet.
 
+## Stage 4 Driver Readiness Notes
+
+Stage 4 should treat the Stage 3 memory work as a set of mechanisms and
+invariants, not as a final device-memory model. The driver framework and
+simulated accelerator should preserve this core rule:
+
+```text
+A device may operate only on kernel-validated, explicitly owned physical memory.
+```
+
+The current identity-mapped kernel page table makes early driver work easier:
+kernel virtual addresses equal physical addresses for managed RAM and MMIO.
+That is a QEMU/simple-kernel convenience, not a general DMA or IOMMU model.
+Driver code should keep physical-address boundaries explicit so a later
+non-identity kernel map or userspace address-space switch does not silently
+break device submission.
+
+`page_alloc()` is the safest first source for device-visible command
+descriptors, descriptor rings, and data buffers. It returns 4 KiB aligned frames
+inside allocator-managed RAM. `kmalloc()` is appropriate for ordinary
+byte-granularity kernel objects, but Stage 4 should not assume every heap block
+is a durable device buffer. If a driver uses heap memory for device-facing
+state, the ownership and physical-address conversion rules must be documented
+at the call site.
+
+User virtual addresses must never be passed directly to the simulated device.
+Kernel-only driver scenarios can begin with kernel-owned buffers. Later
+userspace-facing driver syscalls should use `copy_from_user()` and
+`copy_to_user()` for descriptor-sized metadata, then validate and pin or copy
+payload buffers before constructing device command descriptors.
+
+`vm_get_mapping()` can help inspect the active page table for mapped physical
+addresses and PTE flags, but it is only a translation mechanism. Driver policy
+must still decide whether the calling subsystem owns the frame and whether that
+frame is legal for device access. The current user-space helpers reject
+physical addresses outside managed RAM, but managed RAM is not the same thing as
+uncontended ownership.
+
+Page faults remain fatal except for the narrow usercopy probe path. Driver
+faults should therefore be treated as kernel bugs unless a future driver API
+defines its own explicit recovery contract.
+
+Successful live page-table edits currently issue a coarse `sfence.vma`. That is
+acceptable for the single-hart, single-active-address-space kernel. Stage 4
+should avoid adding a richer TLB policy unless it truly changes mappings for
+device work; Stage 5 user address-space switching is the more natural point to
+revisit per-address or ASID-aware invalidation.
+
+The STM32 RTOS connection is strongest around ISR-to-thread handoff: a device
+interrupt should acknowledge hardware state, update small driver-owned
+completion state, and wake waiters. The RISC-V/QEMU kernel adds virtual-memory
+concerns that the STM32 lab did not need: physical buffer validation, usercopy,
+and keeping device-visible ownership separate from ordinary C pointer use.
+
 ## Kernel Paging
 
 The kernel now enables Sv39 and runs normal kernel code in S-mode under an
