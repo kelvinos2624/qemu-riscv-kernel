@@ -23,9 +23,11 @@ absolute-deadline sleep queue and event-style blocking through wait queues. It
 now includes non-recursive kernel mutexes with FIFO owner transfer,
 timeout-aware blocking, structured scheduler tracing, a bitmap physical page
 allocator, a page-backed size-class kernel heap, Sv39 page-table primitives,
-hardware kernel paging, and diagnostic S-mode page-fault handling. Recoverable
-page faults, U-mode execution, syscalls, and the simulated accelerator driver
-remain future milestones.
+hardware kernel paging, diagnostic S-mode page-fault handling, a minimal
+U-mode task, delegated user `ecall` exit, and safe usercopy with narrowly
+recoverable page-fault probes. The virtual-memory and allocation stage is now
+coherent enough to support the next driver-framework and simulated accelerator
+milestones.
 
 ## Project Goals
 
@@ -111,7 +113,7 @@ Kernel thread scheduling setup is complete:
 - 10 tick / 10 ms scheduler quantum
 - interrupt masking around scheduler state
 
-Virtual memory and allocation setup has begun:
+Stage 3 virtual memory and allocation foundations are complete:
 
 - linker-provided RAM bounds for the current QEMU `virt` memory contract
 - 4 KiB physical page granularity matching RISC-V Sv39 base pages
@@ -139,7 +141,6 @@ Virtual memory and allocation setup has begun:
 - fatal page-fault diagnostics with `scause`, `sepc`, `stval`, `sstatus`,
   `satp`, and current TID
 - dedicated unmapped-load page-fault smoke scenario
-- documented deferral of recoverable fault probes until safe usercopy
 - user mapping helpers over `vm_space_t` for a sparse code-low/stack-high
   virtual layout
 - nullable per-thread address-space placeholder for future U-mode tasks
@@ -149,9 +150,14 @@ Virtual memory and allocation setup has begun:
 - first U-mode task entered with `sret`
 - minimal U-mode `exit` syscall path through delegated user `ecall`
 - temporary first-user mappings in the active kernel page table
+- safe usercopy routines with validation-before-copy semantics
+- per-thread recoverable fault probes for usercopy load/store faults
+- `SSTATUS_SUM` enabled only inside the interrupt-masked copy window
+- cross-page usercopy scenario coverage
 
-The next memory milestones are separate user address-space switching, syscall
-ABI growth, and safe usercopy with recoverable fault probes.
+The next memory-related milestones are separate user address-space switching,
+syscall ABI growth, and a less temporary process/runtime model. The next major
+project section is the driver framework and simulated accelerator.
 
 Common boot output:
 
@@ -215,6 +221,14 @@ scenario: first-user
 user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000
 user: exited code=0x0000000000000000
 milestone 15: first user task
+```
+
+Usercopy scenario output:
+
+```text
+scenario: usercopy
+usercopy: passed
+milestone 16: safe usercopy
 ```
 
 Scheduler/synchronization scenario output:
@@ -315,9 +329,9 @@ round-robin scheduling would be technically misleading.
 |   |-- arch/riscv64/
 |   |-- core/
 |   |-- drivers/
-|   `-- memory/
-|-- tools/
-`-- user/
+|   |-- memory/
+|   `-- user/
+`-- tools/
 ```
 
 Design notes live under `docs/design/`. Design Decision Records live under
@@ -364,6 +378,7 @@ make test SCENARIO=vm
 make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
+make test SCENARIO=usercopy
 make test SCENARIO=scheduler-sync
 ```
 
@@ -379,6 +394,7 @@ make test SCENARIO=vm
 make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
+make test SCENARIO=usercopy
 make clean
 make toolcheck
 ```
@@ -411,8 +427,25 @@ The current scenarios are:
 - `user-space`: validates user mapping policy, sparse layout constants, and
   address-space teardown rules
 - `first-user`: validates `sret` into U-mode and delegated user `ecall` exit
+- `usercopy`: validates safe usercopy validation, cross-page copies, and
+  recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
+
+Stage 3 evidence matrix:
+
+| PR | Capability | Scenario | Smoke marker | Command |
+| --- | --- | --- | --- | --- |
+| PR1 | Physical RAM ownership and page allocation | `allocator` | `milestone 11: physical page allocator` | `make test SCENARIO=allocator` |
+| PR2 | Selectable scenario harness | all scenarios | scenario-specific UART sequence | `make test` |
+| PR3 | Page-backed kernel heap | `heap` | `milestone 12: kernel heap` | `make test SCENARIO=heap` |
+| PR4 | Sv39 page-table primitives | `vm` | `milestone 13: sv39 page table primitives` | `make test SCENARIO=vm` |
+| PR5 | S-mode kernel paging | all scenarios | `milestone 13: kernel paging` | `make test` |
+| PR6 | Fatal page-fault diagnostics | `page-fault` | `trap: page fault access=load` | `make test SCENARIO=page-fault` |
+| PR7 | User address-space skeleton | `user-space` | `milestone 14: user address space skeleton` | `make test SCENARIO=user-space` |
+| PR8 | First U-mode task and exit syscall | `first-user` | `milestone 15: first user task` | `make test SCENARIO=first-user` |
+| PR9 | Safe usercopy and recoverable copy faults | `usercopy` | `milestone 16: safe usercopy` | `make test SCENARIO=usercopy` |
+| PR10 | Stage 3 documentation and evidence cleanup | all scenarios | all current scenario markers | `make test` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -420,11 +453,12 @@ VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
 the common boot path reaches S-mode with Sv39 enabled, an unmapped load produces
 a load page-fault diagnostic, user-space mappings reject invalid VA/PA/flag
 combinations and restore page counts after teardown, the kernel enters one
-U-mode task and handles its exit syscall, one thread times out while waiting for
-a mutex, the idle task runs while all real threads are blocked, a later thread
-can still acquire the mutex after the owner unlocks, and the trace dump includes
-key events such as context switches, idle entry, wait timeout, and mutex
-timeout.
+U-mode task and handles its exit syscall, safe usercopy validates ranges before
+copying, cross-page usercopy succeeds, recoverable usercopy faults return an
+error, one thread times out while waiting for a mutex, the idle task runs while
+all real threads are blocked, a later thread can still acquire the mutex after
+the owner unlocks, and the trace dump includes key events such as context
+switches, idle entry, wait timeout, and mutex timeout.
 
 Planned test categories:
 
