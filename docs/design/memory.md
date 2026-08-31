@@ -348,9 +348,10 @@ layer can add stronger device-memory policy if the target changes.
 
 The active kernel page table is global for all current kernel threads. There is
 no per-thread address-space switch yet and no user page table. S-mode page
-faults are decoded and reported with architectural trap metadata, but they are
-still fatal. Recoverable faults are deferred until the kernel has a narrow
-safe-usercopy contract.
+faults are decoded and reported with architectural trap metadata. Most remain
+fatal; safe usercopy is the one narrow recoverable-fault contract. Usercopy
+validates ranges before copying and recovers only matching load/store faults
+inside its armed copy probe.
 
 ## STM32 RTOS Connection
 

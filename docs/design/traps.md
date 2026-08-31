@@ -3,9 +3,9 @@
 ## Scope
 
 The kernel now boots through a minimal machine-mode shim and runs normal kernel
-code in supervisor mode. M-mode handles only machine-owned platform mechanism.
+code in supervisor mode. M-mode handles only machine-owned platform mechanisms.
 The S-mode kernel owns normal traps, timer accounting, scheduler policy, and
-future user/kernel boundaries.
+user/kernel boundaries.
 
 ## Trap Modes
 
@@ -71,19 +71,22 @@ unexpected-trap panic path. A page fault report prints:
 - `satp`
 - current thread ID
 
-This is diagnostic-only in the current milestone. The kernel does not treat any
-page fault as recoverable yet, does not advance `sepc`, and does not resume
-execution after the report. That keeps real kernel faults loud while the project
-still lacks user mode, address-space teardown, and safe usercopy.
+Most page faults remain diagnostic and fatal. The kernel does not generally
+advance `sepc` or resume execution after the report. That keeps real kernel
+faults loud.
 
 The `page-fault` scenario deliberately performs an unmapped load from
 `0x0000000040000000`. That address is canonical under Sv39 and outside the
 active identity-mapped kernel RAM/MMIO regions, so the smoke test can verify the
 load-fault diagnostic without relying on recovery.
 
-Recoverable fault probes are deferred until safe usercopy. At that point the
-kernel can define a narrow contract for expected faults, identify the faulting
-copy site, and return an error instead of panicking.
+Safe usercopy is the one narrow recovery contract. A thread may arm a temporary
+copy probe before entering the architecture-specific byte-copy loop. The trap
+handler recovers only when the faulting PC is inside that loop, `stval` is
+inside the intended user pointer range, and the trap cause matches the expected
+copy direction. This lets `copy_from_user()` and `copy_to_user()` return an
+error for expected user pointer faults without making unrelated kernel faults
+recoverable.
 
 Unexpected S-mode traps still print CSR diagnostics and panic. Unexpected M-mode
 traps also panic, because the M-mode shim has no recovery policy of its own.
@@ -145,7 +148,6 @@ the broken invariant.
 
 ## Next Work
 
-- Add recoverable usercopy fault probes once U-mode and user mappings exist.
 - Move user execution to a separate user page table with explicit `satp`
   switching or a trampoline.
 - Grow the syscall ABI beyond first-user exit.

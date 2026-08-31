@@ -10,8 +10,9 @@ threads. It also supports FIFO wait queues for blocking on kernel-owned events
 and timeout-aware event waits.
 
 All threads currently run as S-mode kernel threads under the shared identity
-kernel page table. They are not user tasks: there is no user trap return or
-user syscall boundary yet.
+kernel page table. PR8 proves a minimal U-mode task through a hand-built trap
+frame and separate user stack, but the scheduler still does not create or run a
+general user-task abstraction.
 
 ## Public API
 
@@ -84,6 +85,11 @@ Each TCB tracks blocked-state metadata and explicit queue membership:
 - `in_sleep_queue`: whether the TID is in the timeout queue
 - `in_wait_queue`: whether the TID is in an event wait queue
 - `address_space`: nullable placeholder for a future user address space
+
+Recoverable usercopy probe state is stored per thread behind opaque helper
+APIs rather than as public TCB fields. That keeps the copy-fault recovery
+mechanism attached to the current execution context without making scheduler
+policy depend on usercopy internals.
 
 Timed waits may be linked into both the sleep queue and a wait queue. This is
 why the older single queue-owner enum was replaced by explicit membership
@@ -293,8 +299,9 @@ not interpret the field as process ownership.
 
 The placeholder records where a later PR can attach a real user address space.
 PR8 proves U-mode entry with temporary user mappings in the active kernel page
-table, so scheduled threads still execute as S-mode kernel threads on the shared
-identity-mapped kernel page table.
+table, and PR9 validates usercopy against that same active table. Scheduled
+threads still execute as S-mode kernel threads on the shared identity-mapped
+kernel page table unless a scenario explicitly builds and enters a U-mode frame.
 
 ## Interrupt Safety
 
@@ -318,6 +325,6 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Use the per-thread address-space placeholder when user tasks arrive.
+- Use the per-thread address-space placeholder when general user tasks arrive.
 - Add priority scheduling as a future scheduling extension if priority-inversion
   experiments become a goal.
