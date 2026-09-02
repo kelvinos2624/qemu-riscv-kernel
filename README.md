@@ -27,7 +27,7 @@ hardware kernel paging, diagnostic S-mode page-fault handling, a minimal
 U-mode task, delegated user `ecall` exit, and safe usercopy with narrowly
 recoverable page-fault probes. Stage 4 has started with typed MMIO helpers,
 immutable platform device resources, a bounded runtime device registry,
-boot-time built-in driver probing, and a fake driver-framework scenario.
+boot-time built-in driver probing, and a simulated accelerator register model.
 
 ## Project Goals
 
@@ -166,13 +166,16 @@ Stage 4 driver framework foundations are in progress:
 - bind-after-success driver ownership invariant
 - lookup by exact device name and first matching compatible string
 - IRQ metadata and driver callback shape, with dispatch deferred
-- fake platform MMIO resource and stateless fake driver probe
-- driver-framework smoke scenario for binding and MMIO helper behavior
+- simulated accelerator platform MMIO resource and stateless driver probe
+- driver-framework smoke scenario for accelerator binding and MMIO helper behavior
+- accelerator ID, status, control, IRQ status, and IRQ ack register model
+- synchronous register-model completion through a platform simulation hook
+- deterministic reset, done, error, and IRQ acknowledgement behavior
 
 The next memory-related milestones are separate user address-space switching,
 syscall ABI growth, and a less temporary process/runtime model. The next Stage
-4 milestones are the simulated accelerator register model, descriptor-based
-kernel submission, interrupt-driven completion, and timeout/error handling.
+4 milestones are descriptor-based kernel submission, interrupt-driven
+completion, and timeout/error handling.
 
 Common boot output:
 
@@ -250,9 +253,20 @@ Driver-framework scenario output:
 
 ```text
 scenario: driver-framework
-driver: fake device bound
-driver: mmio read/write passed
+driver: accelerator device bound
+driver: accelerator mmio path passed
 milestone 17: driver framework
+```
+
+Accelerator-register scenario output:
+
+```text
+scenario: accel-registers
+accel: reset idle
+accel: start done
+accel: invalid transition error
+accel: reset priority passed
+milestone 18: simulated accelerator registers
 ```
 
 Scheduler/synchronization scenario output:
@@ -404,6 +418,7 @@ make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
+make test SCENARIO=accel-registers
 make test SCENARIO=scheduler-sync
 ```
 
@@ -421,6 +436,7 @@ make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
+make test SCENARIO=accel-registers
 make clean
 make toolcheck
 ```
@@ -458,7 +474,9 @@ The current scenarios are:
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
   scheduler trace events
 - `driver-framework`: validates platform/device/driver boundary separation,
-  boot-time compatible binding, and typed MMIO helper behavior
+  boot-time compatible accelerator binding, and typed MMIO helper behavior
+- `accel-registers`: validates the simulated accelerator register state
+  machine, reset priority, IRQ acknowledgement, and invalid transition behavior
 
 Stage 3 evidence matrix:
 
@@ -480,6 +498,7 @@ Stage 4 evidence matrix:
 | PR | Capability | Scenario | Smoke marker | Command |
 | --- | --- | --- | --- | --- |
 | PR1 | MMIO and driver registration foundations | `driver-framework` | `milestone 17: driver framework` | `make test SCENARIO=driver-framework` |
+| PR2 | Simulated accelerator register model | `accel-registers` | `milestone 18: simulated accelerator registers` | `make test SCENARIO=accel-registers` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -493,8 +512,10 @@ error, one thread times out while waiting for a mutex, the idle task runs while
 all real threads are blocked, a later thread can still acquire the mutex after
 the owner unlocks, the trace dump includes key events such as context switches,
 idle entry, wait timeout, and mutex timeout, and the driver framework binds a
-fake platform device by compatible string before validating MMIO read/write
-behavior through typed helpers.
+simulated accelerator device by compatible string before validating MMIO-backed
+driver operations. The accelerator-register scenario proves reset-to-idle,
+synchronous start-to-done, IRQ acknowledgement without state reset, invalid
+start-after-done error handling, and reset priority over start.
 
 Planned test categories:
 

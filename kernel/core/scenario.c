@@ -5,9 +5,8 @@
 #include "core/thread.h"
 #include "core/trace.h"
 #include "core/trap.h"
+#include "drivers/accel.h"
 #include "drivers/device.h"
-#include "drivers/fake.h"
-#include "drivers/mmio.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
 #include "memory/paging.h"
@@ -32,6 +31,7 @@ static void scenario_first_user(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
+static void scenario_accel_registers(void) __attribute__((noreturn));
 
 extern char first_user_start[];
 extern char first_user_end[];
@@ -755,39 +755,125 @@ static void scenario_driver_framework(void)
 {
     console_write("scenario: driver-framework\n");
 
-    device_t *by_name = device_find_by_name(FAKE_DEVICE_NAME);
+    device_t *by_name = device_find_by_name(ACCEL_DEVICE_NAME);
     if (by_name == NULL) {
-        PANIC("fake device lookup by name failed");
+        PANIC("accelerator lookup by name failed");
     }
 
-    device_t *by_compatible = device_find_by_compatible(FAKE_DEVICE_COMPATIBLE);
+    device_t *by_compatible = device_find_by_compatible(ACCEL_DEVICE_COMPATIBLE);
     if (by_compatible != by_name) {
-        PANIC("fake device lookup by compatible failed");
+        PANIC("accelerator lookup by compatible failed");
     }
 
     if (!device_is_bound(by_name)) {
-        PANIC("fake device did not bind");
+        PANIC("accelerator did not bind");
     }
 
     if (device_driver(by_name) == NULL ||
         device_driver(by_name)->irq_handler == NULL ||
-        device_irq(by_name) != FAKE_DEVICE_IRQ ||
-        device_mmio_size(by_name) < FAKE_MMIO_SIZE) {
-        PANIC("fake device metadata invalid");
+        device_irq(by_name) != ACCEL_DEVICE_IRQ ||
+        device_mmio_size(by_name) < ACCEL_MMIO_SIZE) {
+        PANIC("accelerator metadata invalid");
     }
 
-    const uintptr_t scratch_addr = device_mmio_base(by_name) + FAKE_REG_SCRATCH;
-    mmio_fence_before_device_write();
-    mmio_write32(scratch_addr, 0xa5c35a3cu);
-    const uint32_t scratch = mmio_read32(scratch_addr);
-    mmio_fence_after_device_read();
-    if (scratch != 0xa5c35a3cu) {
-        PANIC("fake device scratch register mismatch");
+    if (accel_reset() != ACCEL_OK || accel_start_selftest() != ACCEL_OK) {
+        PANIC("accelerator framework operation failed");
     }
 
-    console_write("driver: fake device bound\n");
-    console_write("driver: mmio read/write passed\n");
+    uint32_t status = 0;
+    if (accel_get_status(&status) != ACCEL_OK || status != ACCEL_STATUS_DONE) {
+        PANIC("accelerator framework status invalid");
+    }
+
+    console_write("driver: accelerator device bound\n");
+    console_write("driver: accelerator mmio path passed\n");
     console_write("milestone 17: driver framework\n");
+
+    scenario_idle_forever();
+}
+
+static void expect_accel_status(uint32_t expected, const char *name)
+{
+    uint32_t status = 0;
+    if (accel_get_status(&status) != ACCEL_OK || status != expected) {
+        console_write("accel: unexpected status for ");
+        console_write(name);
+        console_write(" value=");
+        console_write_hex64(status);
+        console_write("\n");
+        PANIC("accelerator status mismatch");
+    }
+}
+
+static void expect_accel_irq_status(uint32_t expected, const char *name)
+{
+    uint32_t irq_status = 0;
+    if (accel_get_irq_status(&irq_status) != ACCEL_OK || irq_status != expected) {
+        console_write("accel: unexpected irq status for ");
+        console_write(name);
+        console_write(" value=");
+        console_write_hex64(irq_status);
+        console_write("\n");
+        PANIC("accelerator irq status mismatch");
+    }
+}
+
+static void scenario_accel_registers(void)
+{
+    console_write("scenario: accel-registers\n");
+
+    device_t *dev = device_find_by_name(ACCEL_DEVICE_NAME);
+    if (dev == NULL || !device_is_bound(dev)) {
+        PANIC("accelerator device unavailable");
+    }
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator reset failed");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "reset");
+    expect_accel_irq_status(0, "reset");
+
+    if (accel_start_selftest() != ACCEL_OK) {
+        PANIC("accelerator start failed");
+    }
+    expect_accel_status(ACCEL_STATUS_DONE, "start");
+    expect_accel_irq_status(ACCEL_IRQ_DONE, "start");
+
+    if (accel_ack_irq(ACCEL_IRQ_DONE) != ACCEL_OK) {
+        PANIC("accelerator done ack failed");
+    }
+    expect_accel_status(ACCEL_STATUS_DONE, "ack-done");
+    expect_accel_irq_status(0, "ack-done");
+
+    if (accel_start_selftest() != ACCEL_OK) {
+        PANIC("accelerator invalid start command failed");
+    }
+    expect_accel_status(ACCEL_STATUS_ERROR, "start-after-done");
+    expect_accel_irq_status(ACCEL_IRQ_ERROR, "start-after-done");
+
+    if (accel_ack_irq(ACCEL_IRQ_ERROR) != ACCEL_OK) {
+        PANIC("accelerator error ack failed");
+    }
+    expect_accel_status(ACCEL_STATUS_ERROR, "ack-error");
+    expect_accel_irq_status(0, "ack-error");
+
+    if (accel_write_control_raw(ACCEL_CONTROL_RESET | ACCEL_CONTROL_START) != ACCEL_OK) {
+        PANIC("accelerator reset-start command failed");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "reset-start");
+    expect_accel_irq_status(0, "reset-start");
+
+    if (accel_write_control_raw(ACCEL_CONTROL_START | (1u << 31)) != ACCEL_ERR_INVALID) {
+        PANIC("accelerator invalid control bits accepted");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "invalid-control");
+    expect_accel_irq_status(0, "invalid-control");
+
+    console_write("accel: reset idle\n");
+    console_write("accel: start done\n");
+    console_write("accel: invalid transition error\n");
+    console_write("accel: reset priority passed\n");
+    console_write("milestone 18: simulated accelerator registers\n");
 
     scenario_idle_forever();
 }
@@ -828,6 +914,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_DRIVER_FRAMEWORK) {
         scenario_driver_framework();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_ACCEL_REGISTERS) {
+        scenario_accel_registers();
     }
 
     PANIC("unknown kernel scenario");

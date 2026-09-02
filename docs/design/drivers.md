@@ -6,10 +6,12 @@ Stage 4 introduces the first kernel-side driver framework. This stage moves the
 project from a kernel that manages only itself to a kernel that mediates
 hardware-like devices.
 
-The first PR provides MMIO helpers, immutable platform resource descriptions, a
-bounded runtime device registry, built-in driver probing, and descriptive IRQ
-metadata. It does not yet implement external interrupt routing, blocking driver
-completion, user-facing device syscalls, or a full simulated accelerator.
+The first Stage 4 PR provides MMIO helpers, immutable platform resource
+descriptions, a bounded runtime device registry, built-in driver probing, and
+descriptive IRQ metadata. The next PR replaces the temporary framework test
+device with the simulated accelerator register model. Stage 4 still does not
+implement external interrupt routing, blocking driver completion, user-facing
+device syscalls, or descriptor-based accelerator work.
 
 ## MMIO Access
 
@@ -115,27 +117,28 @@ driver_probe_all
 scenario_run
 ```
 
-This lets scenarios observe a stable post-probe device registry. The PR 1 fake
-driver uses static state only, but later drivers may rely on the heap if their
-probe path needs dynamic kernel-owned objects.
+This lets scenarios observe a stable post-probe device registry. The current
+accelerator driver is stateless and looks up its singleton device through the
+framework on each API call. Later drivers may rely on the heap if their probe
+path needs dynamic kernel-owned objects.
 
 ## Test Evidence
 
 The `driver-framework` scenario validates observable behavior:
 
-- fake platform device lookup by exact name
-- fake platform device lookup by compatible string
+- accelerator platform device lookup by exact name
+- accelerator platform device lookup by compatible string
 - successful driver binding after boot-time probing
-- fake driver probe validates a device ID register through MMIO helpers
-- scenario writes and reads a scratch register through MMIO helpers
+- accelerator driver probe validates a device ID register through MMIO helpers
+- scenario exercises an MMIO-backed accelerator operation through the driver API
 - IRQ metadata and callback shape exist but are not dispatched
 
 The scenario prints:
 
 ```text
 scenario: driver-framework
-driver: fake device bound
-driver: mmio read/write passed
+driver: accelerator device bound
+driver: accelerator mmio path passed
 milestone 17: driver framework
 ```
 

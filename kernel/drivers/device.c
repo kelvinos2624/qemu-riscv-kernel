@@ -1,6 +1,6 @@
 #include "core/kernel.h"
+#include "drivers/accel.h"
 #include "drivers/device.h"
-#include "drivers/fake.h"
 #include "drivers/platform.h"
 
 #define DEVICE_MAX 16u
@@ -10,7 +10,7 @@ static size_t device_count;
 static int devices_initialized;
 
 static const driver_t *const built_in_drivers[] = {
-    &fake_driver,
+    &accel_driver,
 };
 
 static int string_equal(const char *a, const char *b)
@@ -41,14 +41,16 @@ void device_init(void)
         return;
     }
 
-    const device_resource_t *resources = platform_device_resources();
     const size_t resource_count = platform_device_resource_count();
     if (resource_count > DEVICE_MAX) {
         PANIC("too many platform devices");
     }
 
     for (size_t i = 0; i < resource_count; i++) {
-        devices[i].resource = &resources[i];
+        devices[i].resource = platform_device_resource_at(i);
+        if (devices[i].resource == NULL) {
+            PANIC("missing platform device resource");
+        }
         devices[i].driver = NULL;
     }
 

@@ -101,12 +101,25 @@ SCENARIOS = {
         "expected_sequence": [
             "milestone 13: kernel paging",
             "scenario: driver-framework",
-            "driver: fake device bound",
-            "driver: mmio read/write passed",
+            "driver: accelerator device bound",
+            "driver: accelerator mmio path passed",
             "milestone 17: driver framework",
         ],
         "required_trace_types": [],
         "success": "driver framework scenario",
+    },
+    "accel-registers": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: accel-registers",
+            "accel: reset idle",
+            "accel: start done",
+            "accel: invalid transition error",
+            "accel: reset priority passed",
+            "milestone 18: simulated accelerator registers",
+        ],
+        "required_trace_types": [],
+        "success": "simulated accelerator register scenario",
     },
 }
 TIMEOUT_SECONDS = 15.0
@@ -123,6 +136,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 15:")
         or line.startswith("milestone 16:")
         or line.startswith("milestone 17:")
+        or line.startswith("milestone 18:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
@@ -131,6 +145,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("trace:")
         or line.startswith("thread: null idle")
         or line.startswith("driver:")
+        or line.startswith("accel:")
     )
 
 
