@@ -129,6 +129,13 @@ submitter claims the slot before ringing the device doorbell and releases it
 only after waking and reading the result. A second submitter while the slot is
 owned receives `ACCEL_ERR_BUSY` and descriptor status `REJECTED`.
 
+Public register-level helpers that can perturb accelerator lifecycle state,
+including raw reset/start/control and IRQ ack paths, also reject with
+`ACCEL_ERR_BUSY` while the descriptor request slot is owned. This keeps
+descriptor submission as the single lifecycle authority for an in-flight
+request. The ISR uses private direct MMIO acknowledgement for the request it is
+completing.
+
 The wait condition is driver-owned request state, not the device-owned
 descriptor status. The ISR bridges the two:
 
@@ -273,6 +280,8 @@ The `accelerator-irq-completion` scenario verifies:
 - competing submitter is rejected while the slot is owned
 - simulator worker explicitly calls `platform_accel_step()` and
   `platform_dispatch_pending_irqs()`
+- public raw reset/start/ack helpers are rejected while the descriptor request
+  slot is owned
 - driver ISR records completion, acks IRQ status, and wakes the blocked
   submitter
 - completion leaves the device in `DONE` with IRQ status cleared

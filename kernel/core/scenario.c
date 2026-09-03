@@ -1140,6 +1140,11 @@ static void accel_irq_competing_thread(void *arg)
         accel_irq_competing_cmd->status != ACCEL_CMD_STATUS_REJECTED) {
         PANIC("accelerator competing submit was not rejected");
     }
+    if (accel_reset() != ACCEL_ERR_BUSY ||
+        accel_start_selftest() != ACCEL_ERR_BUSY ||
+        accel_ack_irq(ACCEL_IRQ_DONE) != ACCEL_ERR_BUSY) {
+        PANIC("accelerator raw helpers perturbed active request");
+    }
     if (accel_irq_worker_dispatched) {
         PANIC("accelerator worker dispatched too early");
     }

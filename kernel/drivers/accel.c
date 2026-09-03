@@ -174,9 +174,16 @@ int accel_ack_irq(uint32_t mask)
         return ACCEL_ERR_NO_DEVICE;
     }
 
+    irq_state_t irq_state = irq_save();
+    if (accel_request.in_use) {
+        irq_restore(irq_state);
+        return ACCEL_ERR_BUSY;
+    }
+
     mmio_fence_before_device_write();
     mmio_write32(device_mmio_base(dev) + ACCEL_REG_IRQ_ACK, mask);
     platform_accel_step();
+    irq_restore(irq_state);
     return ACCEL_OK;
 }
 
@@ -192,9 +199,16 @@ int accel_write_control_raw(uint32_t control)
         return ACCEL_ERR_NO_DEVICE;
     }
 
+    irq_state_t irq_state = irq_save();
+    if (accel_request.in_use) {
+        irq_restore(irq_state);
+        return ACCEL_ERR_BUSY;
+    }
+
     mmio_fence_before_device_write();
     mmio_write32(device_mmio_base(dev) + ACCEL_REG_CONTROL, control);
     platform_accel_step();
+    irq_restore(irq_state);
     return ACCEL_OK;
 }
 

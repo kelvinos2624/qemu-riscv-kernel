@@ -38,6 +38,12 @@ validates the descriptor, claims the slot under `irq_save()`, writes
 `ACCEL_CMD_BASE`, writes `START`, and sleeps on a driver-owned completion
 predicate. It does not call `platform_accel_step()` for submission progress.
 
+Public register-level helpers that can mutate accelerator lifecycle state,
+including reset/start/control and IRQ acknowledgement, return `ACCEL_ERR_BUSY`
+while that request slot is owned. This prevents a second thread from clearing
+device state or IRQ bits out from under the blocked submitter. The ISR keeps a
+private direct acknowledgement path for the IRQ it is currently handling.
+
 The simulated hardware worker calls:
 
 ```c
@@ -69,6 +75,10 @@ The single static request slot makes the API non-reentrant. Concurrent
 submissions are rejected with `ACCEL_ERR_BUSY`; if the descriptor is safe, its
 status becomes `ACCEL_CMD_STATUS_REJECTED`.
 
+Register-level helper calls that would perturb an active descriptor request are
+also rejected while the slot is owned. Callers may still read status registers,
+but control/reset/ack policy is serialized behind the active request.
+
 `irq_save()` is sufficient for the current single-hart kernel and matches the
 existing wait-queue/mutex style. A future SMP kernel should replace this with a
 spinlock or other interrupt-safe lock primitive.
@@ -98,7 +108,8 @@ The `accelerator-irq-completion` scenario uses three kernel threads:
 - a simulator worker that advances the platform and dispatches pending IRQs
 
 The scenario also verifies descriptor memory results, IRQ acknowledgement by
-the ISR, reset-before-reuse behavior, and spurious IRQ acknowledgement.
+the ISR, raw-helper rejection while the request slot is owned,
+reset-before-reuse behavior, and spurious IRQ acknowledgement.
 
 The smoke marker is:
 
