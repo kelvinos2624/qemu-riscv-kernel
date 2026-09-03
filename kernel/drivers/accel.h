@@ -15,7 +15,8 @@
 #define ACCEL_REG_CONTROL ((uintptr_t)0x08)
 #define ACCEL_REG_IRQ_STATUS ((uintptr_t)0x0c)
 #define ACCEL_REG_IRQ_ACK ((uintptr_t)0x10)
-#define ACCEL_MMIO_SIZE ((uintptr_t)0x14)
+#define ACCEL_REG_CMD_BASE ((uintptr_t)0x18)
+#define ACCEL_MMIO_SIZE ((uintptr_t)0x20)
 
 #define ACCEL_STATUS_IDLE (1u << 0)
 #define ACCEL_STATUS_BUSY (1u << 1)
@@ -31,6 +32,8 @@
 #define ACCEL_OK 0
 #define ACCEL_ERR_NO_DEVICE (-1)
 #define ACCEL_ERR_INVALID (-2)
+#define ACCEL_ERR_BUSY (-3)
+#define ACCEL_ERR_IO (-4)
 
 extern const driver_t accel_driver;
 

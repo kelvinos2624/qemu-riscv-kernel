@@ -14,5 +14,6 @@ size_t page_free_count(void);
 size_t page_total_count(void);
 uintptr_t page_managed_start(void);
 uintptr_t page_managed_end(void);
+int page_range_is_managed_page_contained(uintptr_t addr, size_t len);
 
 #endif

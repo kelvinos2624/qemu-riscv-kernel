@@ -188,3 +188,21 @@ uintptr_t page_managed_end(void)
 {
     return managed_end;
 }
+
+int page_range_is_managed_page_contained(uintptr_t addr, size_t len)
+{
+    if (!page_allocator_initialized || len == 0) {
+        return 0;
+    }
+
+    const uintptr_t end = addr + (uintptr_t)len - 1u;
+    if (end < addr) {
+        return 0;
+    }
+
+    if (addr < managed_start || end >= managed_end) {
+        return 0;
+    }
+
+    return (addr & ~PAGE_MASK) == (end & ~PAGE_MASK);
+}

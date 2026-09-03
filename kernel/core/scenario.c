@@ -6,6 +6,7 @@
 #include "core/trace.h"
 #include "core/trap.h"
 #include "drivers/accel.h"
+#include "drivers/accel_cmd.h"
 #include "drivers/device.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
@@ -20,6 +21,7 @@
 
 static mutex_t demo_mutex;
 static volatile int demo_shared_counter;
+static accel_cmd_t static_accel_cmd;
 
 static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
@@ -32,6 +34,7 @@ static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
 static void scenario_accel_registers(void) __attribute__((noreturn));
+static void scenario_accelerator_descriptors(void) __attribute__((noreturn));
 
 extern char first_user_start[];
 extern char first_user_end[];
@@ -61,6 +64,21 @@ static void memory_zero(void *ptr, size_t size)
     for (size_t i = 0; i < size; i++) {
         bytes[i] = 0;
     }
+}
+
+static void scenario_init_memset_cmd(
+    accel_cmd_t *cmd,
+    void *dst,
+    uint32_t len,
+    uint32_t value)
+{
+    cmd->op = ACCEL_CMD_OP_MEMSET;
+    cmd->flags = 0;
+    cmd->dst_pa = (uint64_t)(uintptr_t)dst;
+    cmd->len = len;
+    cmd->value = value;
+    cmd->status = ACCEL_CMD_STATUS_ERROR;
+    cmd->reserved = 0;
 }
 
 static void scenario_idle_forever(void)
@@ -878,6 +896,99 @@ static void scenario_accel_registers(void)
     scenario_idle_forever();
 }
 
+static void scenario_accelerator_descriptors(void)
+{
+    console_write("scenario: accelerator-descriptors\n");
+
+    void *cmd_page = page_alloc();
+    void *buffer_page = page_alloc();
+    if (cmd_page == NULL || buffer_page == NULL) {
+        PANIC("accelerator descriptor pages unavailable");
+    }
+
+    memory_zero(cmd_page, PAGE_SIZE);
+    uint8_t *buffer = buffer_page;
+    for (size_t i = 0; i < PAGE_SIZE; i++) {
+        buffer[i] = 0xccu;
+    }
+
+    uint8_t *cmd_bytes = cmd_page;
+    accel_cmd_t *cmd = (accel_cmd_t *)(void *)(cmd_bytes + 64u);
+    uint8_t *dst = buffer + 37u;
+    const uint32_t len = 64u;
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator descriptor reset failed");
+    }
+
+    scenario_init_memset_cmd(cmd, dst, len, 0x1234565au);
+    if (accel_submit_sync(cmd) != ACCEL_OK ||
+        cmd->status != ACCEL_CMD_STATUS_OK) {
+        PANIC("accelerator descriptor memset failed");
+    }
+    expect_accel_status(ACCEL_STATUS_DONE, "descriptor-memset");
+    expect_accel_irq_status(ACCEL_IRQ_DONE, "descriptor-memset");
+
+    if (buffer[36] != 0xccu || buffer[37u + len] != 0xccu) {
+        PANIC("accelerator descriptor memset overflowed buffer");
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        if (dst[i] != 0x5au) {
+            PANIC("accelerator descriptor memset wrote wrong value");
+        }
+    }
+    console_write("accel: descriptor memset passed\n");
+
+    if (accel_submit_sync(cmd) != ACCEL_ERR_BUSY ||
+        cmd->status != ACCEL_CMD_STATUS_REJECTED) {
+        PANIC("accelerator descriptor lifecycle rejection failed");
+    }
+
+    if (accel_ack_irq(ACCEL_IRQ_DONE) != ACCEL_OK ||
+        accel_reset() != ACCEL_OK) {
+        PANIC("accelerator descriptor cleanup failed");
+    }
+
+    scenario_init_memset_cmd(cmd, dst, len, 0x11u);
+    cmd->op = 99u;
+    if (accel_submit_sync(cmd) != ACCEL_ERR_INVALID ||
+        cmd->status != ACCEL_CMD_STATUS_INVALID) {
+        PANIC("accelerator descriptor invalid op accepted");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "invalid-op");
+    expect_accel_irq_status(0, "invalid-op");
+
+    scenario_init_memset_cmd(cmd, buffer + PAGE_SIZE - 8u, 16u, 0x22u);
+    if (accel_submit_sync(cmd) != ACCEL_ERR_INVALID ||
+        cmd->status != ACCEL_CMD_STATUS_INVALID) {
+        PANIC("accelerator descriptor page-crossing buffer accepted");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "crossing-buffer");
+    expect_accel_irq_status(0, "crossing-buffer");
+
+    scenario_init_memset_cmd(&static_accel_cmd, dst, len, 0x33u);
+    if (accel_submit_sync(&static_accel_cmd) != ACCEL_ERR_INVALID ||
+        static_accel_cmd.status != ACCEL_CMD_STATUS_ERROR) {
+        PANIC("accelerator descriptor unmanaged descriptor accepted");
+    }
+
+    accel_cmd_t *unaligned_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 1u);
+    if (accel_submit_sync(unaligned_cmd) != ACCEL_ERR_INVALID) {
+        PANIC("accelerator descriptor unaligned descriptor accepted");
+    }
+
+    accel_cmd_t *crossing_cmd =
+        (accel_cmd_t *)(void *)(cmd_bytes + PAGE_SIZE - 16u);
+    if (accel_submit_sync(crossing_cmd) != ACCEL_ERR_INVALID) {
+        PANIC("accelerator descriptor page-crossing descriptor accepted");
+    }
+    console_write("accel: descriptor validation passed\n");
+    console_write("accel: descriptor lifecycle rejection passed\n");
+    console_write("milestone 19: accelerator descriptors\n");
+
+    scenario_idle_forever();
+}
+
 void scenario_run(void)
 {
     if (CONFIG_SCENARIO == SCENARIO_ALLOCATOR) {
@@ -918,6 +1029,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_ACCEL_REGISTERS) {
         scenario_accel_registers();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_DESCRIPTORS) {
+        scenario_accelerator_descriptors();
     }
 
     PANIC("unknown kernel scenario");

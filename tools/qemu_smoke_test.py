@@ -121,6 +121,18 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "simulated accelerator register scenario",
     },
+    "accelerator-descriptors": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: accelerator-descriptors",
+            "accel: descriptor memset passed",
+            "accel: descriptor validation passed",
+            "accel: descriptor lifecycle rejection passed",
+            "milestone 19: accelerator descriptors",
+        ],
+        "required_trace_types": [],
+        "success": "accelerator descriptor scenario",
+    },
 }
 TIMEOUT_SECONDS = 15.0
 
@@ -137,6 +149,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 16:")
         or line.startswith("milestone 17:")
         or line.startswith("milestone 18:")
+        or line.startswith("milestone 19:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
