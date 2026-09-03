@@ -6,12 +6,12 @@ Stage 4 introduces the first kernel-side driver framework. This stage moves the
 project from a kernel that manages only itself to a kernel that mediates
 hardware-like devices.
 
-The first Stage 4 PR provides MMIO helpers, immutable platform resource
-descriptions, a bounded runtime device registry, built-in driver probing, and
-descriptive IRQ metadata. Later Stage 4 work adds the simulated accelerator
-register model, descriptor submission APIs, interrupt-driven completion, and
-timeout-aware recovery policy. Stage 4 still does not implement real external
-interrupt-controller routing or user-facing device syscalls.
+Stage 4 provides MMIO helpers, immutable platform resource descriptions, a
+bounded runtime device registry, built-in driver probing, descriptive IRQ
+metadata, a simulated accelerator register model, descriptor submission APIs,
+interrupt-driven completion, and timeout-aware recovery policy. Stage 4 still
+does not implement real external interrupt-controller routing or user-facing
+device syscalls.
 
 ## MMIO Access
 

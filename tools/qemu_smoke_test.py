@@ -108,10 +108,10 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "driver framework scenario",
     },
-    "accel-registers": {
+    "accelerator-registers": {
         "expected_sequence": [
             "milestone 13: kernel paging",
-            "scenario: accel-registers",
+            "scenario: accelerator-registers",
             "accel: reset idle",
             "accel: start done",
             "accel: invalid transition error",

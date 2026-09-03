@@ -55,7 +55,7 @@ static void scenario_first_user(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
-static void scenario_accel_registers(void) __attribute__((noreturn));
+static void scenario_accelerator_registers(void) __attribute__((noreturn));
 static void scenario_accelerator_descriptors(void) __attribute__((noreturn));
 static void scenario_accelerator_irq_completion(void) __attribute__((noreturn));
 static void scenario_accelerator_timeout_error_handling(void) __attribute__((noreturn));
@@ -881,9 +881,9 @@ static void expect_accel_irq_status(uint32_t expected, const char *name)
     }
 }
 
-static void scenario_accel_registers(void)
+static void scenario_accelerator_registers(void)
 {
-    console_write("scenario: accel-registers\n");
+    console_write("scenario: accelerator-registers\n");
 
     device_t *dev = device_find_by_name(ACCEL_DEVICE_NAME);
     if (dev == NULL || !device_is_bound(dev)) {
@@ -1444,8 +1444,8 @@ void scenario_run(void)
         scenario_driver_framework();
     }
 
-    if (CONFIG_SCENARIO == SCENARIO_ACCEL_REGISTERS) {
-        scenario_accel_registers();
+    if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_REGISTERS) {
+        scenario_accelerator_registers();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_DESCRIPTORS) {
