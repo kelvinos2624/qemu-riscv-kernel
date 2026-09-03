@@ -27,7 +27,9 @@ hardware kernel paging, diagnostic S-mode page-fault handling, a minimal
 U-mode task, delegated user `ecall` exit, and safe usercopy with narrowly
 recoverable page-fault probes. Stage 4 has started with typed MMIO helpers,
 immutable platform device resources, a bounded runtime device registry,
-boot-time built-in driver probing, and a simulated accelerator register model.
+boot-time built-in driver probing, a simulated accelerator register model, and
+allocator-backed accelerator command descriptors for kernel-submitted `MEMSET`
+work.
 
 ## Project Goals
 
@@ -171,6 +173,11 @@ Stage 4 driver framework foundations are in progress:
 - accelerator ID, status, control, IRQ status, and IRQ ack register model
 - synchronous register-model completion through a platform simulation hook
 - deterministic reset, done, error, and IRQ acknowledgement behavior
+- accelerator command descriptor ABI and synchronous kernel submission API
+- allocator-managed page-contained descriptor and destination validation
+- simulated device execution of descriptor-backed `MEMSET`
+- explicit descriptor status for pending, success, invalid, error, and rejected
+  commands
 
 The next memory-related milestones are separate user address-space switching,
 syscall ABI growth, and a less temporary process/runtime model. The next Stage
@@ -267,6 +274,16 @@ accel: start done
 accel: invalid transition error
 accel: reset priority passed
 milestone 18: simulated accelerator registers
+```
+
+Accelerator-descriptor scenario output:
+
+```text
+scenario: accelerator-descriptors
+accel: descriptor memset passed
+accel: descriptor validation passed
+accel: descriptor lifecycle rejection passed
+milestone 19: accelerator descriptors
 ```
 
 Scheduler/synchronization scenario output:
@@ -419,6 +436,7 @@ make test SCENARIO=first-user
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accel-registers
+make test SCENARIO=accelerator-descriptors
 make test SCENARIO=scheduler-sync
 ```
 
@@ -437,6 +455,7 @@ make test SCENARIO=first-user
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accel-registers
+make test SCENARIO=accelerator-descriptors
 make clean
 make toolcheck
 ```
@@ -477,6 +496,9 @@ The current scenarios are:
   boot-time compatible accelerator binding, and typed MMIO helper behavior
 - `accel-registers`: validates the simulated accelerator register state
   machine, reset priority, IRQ acknowledgement, and invalid transition behavior
+- `accelerator-descriptors`: validates descriptor-based `MEMSET` submission,
+  allocator-managed page-contained descriptor and buffer validation, and
+  lifecycle rejection before reset
 
 Stage 3 evidence matrix:
 
@@ -499,6 +521,7 @@ Stage 4 evidence matrix:
 | --- | --- | --- | --- | --- |
 | PR1 | MMIO and driver registration foundations | `driver-framework` | `milestone 17: driver framework` | `make test SCENARIO=driver-framework` |
 | PR2 | Simulated accelerator register model | `accel-registers` | `milestone 18: simulated accelerator registers` | `make test SCENARIO=accel-registers` |
+| PR3 | Command descriptor format and kernel submission API | `accelerator-descriptors` | `milestone 19: accelerator descriptors` | `make test SCENARIO=accelerator-descriptors` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -515,7 +538,10 @@ idle entry, wait timeout, and mutex timeout, and the driver framework binds a
 simulated accelerator device by compatible string before validating MMIO-backed
 driver operations. The accelerator-register scenario proves reset-to-idle,
 synchronous start-to-done, IRQ acknowledgement without state reset, invalid
-start-after-done error handling, and reset priority over start.
+start-after-done error handling, and reset priority over start. The
+accelerator-descriptor scenario proves allocator-backed descriptor submission,
+safe page-contained execution, invalid descriptor/range rejection, and
+deterministic lifecycle rejection before reset.
 
 Planned test categories:
 

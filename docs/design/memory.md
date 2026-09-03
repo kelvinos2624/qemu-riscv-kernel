@@ -346,6 +346,12 @@ is a durable device buffer. If a driver uses heap memory for device-facing
 state, the ownership and physical-address conversion rules must be documented
 at the call site.
 
+`page_range_is_managed_page_contained()` is a narrow mechanism for early driver
+validation. It proves that a nonempty physical range lies inside the
+allocator-managed RAM window and does not cross a 4 KiB page boundary. It does
+not prove that the caller currently owns the frame. The accelerator descriptor
+API still requires callers to allocate and retain the pages they submit.
+
 User virtual addresses must never be passed directly to the simulated device.
 Kernel-only driver scenarios can begin with kernel-owned buffers. Later
 userspace-facing driver syscalls should use `copy_from_user()` and
