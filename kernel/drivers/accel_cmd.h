@@ -12,6 +12,7 @@
 #define ACCEL_CMD_STATUS_INVALID 2u
 #define ACCEL_CMD_STATUS_ERROR 3u
 #define ACCEL_CMD_STATUS_REJECTED 4u
+#define ACCEL_CMD_STATUS_TIMEOUT 5u
 
 #define ACCEL_CMD_ALIGNMENT 8u
 
@@ -26,5 +27,6 @@ typedef struct accel_cmd {
 } accel_cmd_t;
 
 int accel_submit_sync(accel_cmd_t *cmd);
+int accel_submit_sync_timeout(accel_cmd_t *cmd, uint64_t ticks);
 
 #endif

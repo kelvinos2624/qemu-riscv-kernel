@@ -30,7 +30,8 @@ immutable platform device resources, a bounded runtime device registry,
 boot-time built-in driver probing, a simulated accelerator register model, and
 allocator-backed accelerator command descriptors for kernel-submitted `MEMSET`
 work. Accelerator descriptor completion now flows through simulated IRQ
-dispatch, the driver ISR, and wait queues.
+dispatch, the driver ISR, and wait queues, with explicit timeout/error handling
+and reset-required recovery.
 
 ## Project Goals
 
@@ -183,10 +184,15 @@ Stage 4 driver framework foundations are in progress:
 - interrupt-driven accelerator completion using a driver-owned request slot and
   wait queue
 - ISR acknowledgement of accelerator completion/error IRQ status
+- timeout-aware accelerator submission API
+- descriptor timeout status and `ACCEL_ERR_TIMEOUT` reporting
+- reset-required recovery policy after timed-out accelerator requests
+- late accelerator IRQ acknowledgement after timeout without descriptor result
+  rewrite
 
 The next memory-related milestones are separate user address-space switching,
 syscall ABI growth, and a less temporary process/runtime model. The next Stage
-4 milestone is timeout/error handling for the accelerator driver path.
+4 milestone is integration cleanup before userspace runtime work.
 
 Common boot output:
 
@@ -350,10 +356,11 @@ The system will grow through five major deliverables.
 
 ## Simulated Accelerator Direction
 
-A later milestone will add a small simulated hardware accelerator rather than a
-fake GPU, TPU, NIC, or storage controller. The device will expose MMIO registers
-and accept command descriptors for operations such as memory set, XOR, or
-checksum.
+Stage 4 uses a small simulated hardware accelerator rather than a fake GPU,
+TPU, NIC, or storage controller. The device exposes MMIO registers and accepts
+command descriptors. The current operation set is intentionally narrow:
+allocator-backed kernel callers can submit one page-contained `MEMSET`
+operation, then wait for interrupt-driven completion or timeout.
 
 The point of this subsystem is to demonstrate driver concepts that transfer
 across many hardware domains:
@@ -520,6 +527,9 @@ The current scenarios are:
 - `accelerator-irq-completion`: validates simulated IRQ dispatch, ISR
   completion, wait-queue wakeup, competing-submit rejection, reset-before-reuse,
   and spurious IRQ acknowledgement
+- `accelerator-timeout-error-handling`: validates zero-timeout rejection, stuck
+  request timeout, reset-required recovery, late IRQ cleanup, timed successful
+  completion, and invalid command reporting
 
 Stage 3 evidence matrix:
 
@@ -544,6 +554,7 @@ Stage 4 evidence matrix:
 | PR2 | Simulated accelerator register model | `accel-registers` | `milestone 18: simulated accelerator registers` | `make test SCENARIO=accel-registers` |
 | PR3 | Command descriptor format and kernel submission API | `accelerator-descriptors` | `milestone 19: accelerator descriptors` | `make test SCENARIO=accelerator-descriptors` |
 | PR4 | Interrupt-driven completion path | `accelerator-irq-completion` | `milestone 20: interrupt-driven accelerator completion` | `make test SCENARIO=accelerator-irq-completion` |
+| PR5 | Timeout and error handling | `accelerator-timeout-error-handling` | `milestone 21: accelerator timeout/error handling` | `make test SCENARIO=accelerator-timeout-error-handling` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -567,7 +578,11 @@ deterministic lifecycle rejection before reset. The accelerator IRQ-completion
 scenario proves that descriptor completion can block on driver-owned request
 state, wake through the simulated IRQ dispatch and ISR path, reject a competing
 submitter while the slot is owned, preserve reset-before-reuse behavior, and
-ack a spurious accelerator IRQ without an active request.
+ack a spurious accelerator IRQ without an active request. The accelerator
+timeout/error scenario proves immediate timeout before start, timeout of a
+stuck request, reset-required recovery before public lifecycle reuse, late IRQ
+cleanup without rewriting the timed-out descriptor result, successful completion
+before a nonzero timeout, and invalid command reporting through the timed API.
 
 Planned test categories:
 

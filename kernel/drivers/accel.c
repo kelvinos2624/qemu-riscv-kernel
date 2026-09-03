@@ -14,6 +14,7 @@ typedef struct accel_request_state {
     int in_use;
     int completed;
     int result;
+    int reset_required_after_timeout;
 } accel_request_state_t;
 
 static accel_request_state_t accel_request;
@@ -40,6 +41,7 @@ static int accel_probe(device_t *dev)
     accel_request.in_use = 0;
     accel_request.completed = 0;
     accel_request.result = ACCEL_ERR_IO;
+    accel_request.reset_required_after_timeout = 0;
     return 0;
 }
 
@@ -175,7 +177,8 @@ int accel_ack_irq(uint32_t mask)
     }
 
     irq_state_t irq_state = irq_save();
-    if (accel_request.in_use) {
+    if (accel_request.in_use ||
+        accel_request.reset_required_after_timeout) {
         irq_restore(irq_state);
         return ACCEL_ERR_BUSY;
     }
@@ -205,17 +208,36 @@ int accel_write_control_raw(uint32_t control)
         return ACCEL_ERR_BUSY;
     }
 
+    if (accel_request.reset_required_after_timeout &&
+        (control & ACCEL_CONTROL_RESET) == 0) {
+        irq_restore(irq_state);
+        return ACCEL_ERR_BUSY;
+    }
+
     mmio_fence_before_device_write();
     mmio_write32(device_mmio_base(dev) + ACCEL_REG_CONTROL, control);
     platform_accel_step();
+    if ((control & ACCEL_CONTROL_RESET) != 0) {
+        accel_request.reset_required_after_timeout = 0;
+    }
     irq_restore(irq_state);
     return ACCEL_OK;
 }
 
 int accel_submit_sync(accel_cmd_t *cmd)
 {
+    return accel_submit_sync_timeout(cmd, UINT64_MAX);
+}
+
+int accel_submit_sync_timeout(accel_cmd_t *cmd, uint64_t ticks)
+{
     if (!accel_cmd_pointer_is_safe(cmd)) {
         return ACCEL_ERR_INVALID;
+    }
+
+    if (ticks == 0) {
+        cmd->status = ACCEL_CMD_STATUS_TIMEOUT;
+        return ACCEL_ERR_TIMEOUT;
     }
 
     device_t *dev = accel_device();
@@ -237,7 +259,8 @@ int accel_submit_sync(accel_cmd_t *cmd)
         return ACCEL_ERR_BUSY;
     }
 
-    if (!accel_device_is_ready(dev)) {
+    if (accel_request.reset_required_after_timeout ||
+        !accel_device_is_ready(dev)) {
         cmd->status = ACCEL_CMD_STATUS_REJECTED;
         irq_restore(irq_state);
         return ACCEL_ERR_BUSY;
@@ -254,11 +277,24 @@ int accel_submit_sync(accel_cmd_t *cmd)
     mmio_fence_before_device_write();
     mmio_write32(base + ACCEL_REG_CONTROL, ACCEL_CONTROL_START);
 
+    int result = ACCEL_ERR_IO;
     while (!accel_request.completed) {
-        wait_queue_sleep(&accel_request.waiters);
+        if (ticks == UINT64_MAX) {
+            wait_queue_sleep(&accel_request.waiters);
+            continue;
+        }
+
+        if (wait_queue_sleep_timeout(&accel_request.waiters, ticks) == WAIT_TIMEOUT) {
+            cmd->status = ACCEL_CMD_STATUS_TIMEOUT;
+            accel_request.reset_required_after_timeout = 1;
+            result = ACCEL_ERR_TIMEOUT;
+            break;
+        }
     }
 
-    const int result = accel_request.result;
+    if (accel_request.completed) {
+        result = accel_request.result;
+    }
     accel_request.cmd = NULL;
     accel_request.in_use = 0;
     accel_request.completed = 0;

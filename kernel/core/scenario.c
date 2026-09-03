@@ -35,6 +35,15 @@ static volatile int accel_irq_submitter_started;
 static volatile int accel_irq_competitor_done;
 static volatile int accel_irq_worker_dispatched;
 static volatile int accel_irq_reuse_started;
+static accel_cmd_t *accel_timeout_stuck_cmd;
+static accel_cmd_t *accel_timeout_reuse_cmd;
+static accel_cmd_t *accel_timeout_invalid_cmd;
+static uint8_t *accel_timeout_buffer;
+static volatile int accel_timeout_submit_started;
+static volatile int accel_timeout_observed;
+static volatile int accel_timeout_late_irq_done;
+static volatile int accel_timeout_reuse_started;
+static volatile int accel_timeout_reuse_dispatched;
 
 static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
@@ -49,6 +58,7 @@ static void scenario_driver_framework(void) __attribute__((noreturn));
 static void scenario_accel_registers(void) __attribute__((noreturn));
 static void scenario_accelerator_descriptors(void) __attribute__((noreturn));
 static void scenario_accelerator_irq_completion(void) __attribute__((noreturn));
+static void scenario_accelerator_timeout_error_handling(void) __attribute__((noreturn));
 
 extern char first_user_start[];
 extern char first_user_end[];
@@ -1209,6 +1219,193 @@ static void scenario_accelerator_irq_completion(void)
     thread_start();
 }
 
+static void accel_timeout_submitter_thread(void *arg)
+{
+    (void)arg;
+
+    const size_t stuck_offset = 80u;
+    const uint32_t stuck_len = 48u;
+    scenario_init_memset_cmd(
+        accel_timeout_stuck_cmd,
+        accel_timeout_buffer + stuck_offset,
+        stuck_len,
+        0x77u);
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator timeout reset failed");
+    }
+
+    accel_timeout_submit_started = 1;
+    if (accel_submit_sync_timeout(accel_timeout_stuck_cmd, 5) !=
+            ACCEL_ERR_TIMEOUT ||
+        accel_timeout_stuck_cmd->status != ACCEL_CMD_STATUS_TIMEOUT) {
+        PANIC("accelerator stuck request did not time out");
+    }
+    if (accel_timeout_buffer[stuck_offset] != 0xccu) {
+        PANIC("accelerator timeout wrote before hardware step");
+    }
+    console_write("accel: stuck request timed out\n");
+
+    scenario_init_memset_cmd(
+        accel_timeout_reuse_cmd,
+        accel_timeout_buffer + 160u,
+        16u,
+        0x88u);
+    if (accel_submit_sync_timeout(accel_timeout_reuse_cmd, 5) !=
+            ACCEL_ERR_BUSY ||
+        accel_timeout_reuse_cmd->status != ACCEL_CMD_STATUS_REJECTED ||
+        accel_start_selftest() != ACCEL_ERR_BUSY ||
+        accel_ack_irq(ACCEL_IRQ_ERROR) != ACCEL_ERR_BUSY) {
+        PANIC("accelerator timeout recovery did not require reset");
+    }
+    console_write("accel: reset required after timeout\n");
+
+    accel_timeout_observed = 1;
+    while (!accel_timeout_late_irq_done) {
+        thread_yield();
+    }
+
+    if (accel_timeout_stuck_cmd->status != ACCEL_CMD_STATUS_TIMEOUT) {
+        PANIC("accelerator late irq rewrote timeout descriptor");
+    }
+    expect_accel_status(ACCEL_STATUS_ERROR, "late-timeout");
+    expect_accel_irq_status(0, "late-timeout");
+    console_write("accel: late irq after timeout acked\n");
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator timeout recovery reset failed");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "timeout-reset");
+    expect_accel_irq_status(0, "timeout-reset");
+
+    scenario_init_memset_cmd(
+        accel_timeout_reuse_cmd,
+        accel_timeout_buffer + 240u,
+        32u,
+        0x99u);
+    accel_timeout_reuse_started = 1;
+    if (accel_submit_sync_timeout(accel_timeout_reuse_cmd, 30) != ACCEL_OK ||
+        accel_timeout_reuse_cmd->status != ACCEL_CMD_STATUS_OK) {
+        PANIC("accelerator timed submit did not complete");
+    }
+    if (!accel_timeout_reuse_dispatched) {
+        PANIC("accelerator timed submit returned before dispatch");
+    }
+    scenario_expect_memset_range(accel_timeout_buffer, 240u, 32u, 0x99u);
+    expect_accel_status(ACCEL_STATUS_DONE, "timed-submit");
+    expect_accel_irq_status(0, "timed-submit");
+    console_write("accel: timed submit completed before timeout\n");
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator invalid command reset failed");
+    }
+    scenario_init_memset_cmd(
+        accel_timeout_invalid_cmd,
+        accel_timeout_buffer + 320u,
+        8u,
+        0xaau);
+    accel_timeout_invalid_cmd->op = 99u;
+    if (accel_submit_sync_timeout(accel_timeout_invalid_cmd, 5) !=
+            ACCEL_ERR_INVALID ||
+        accel_timeout_invalid_cmd->status != ACCEL_CMD_STATUS_INVALID) {
+        PANIC("accelerator timed invalid command accepted");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "timed-invalid-command");
+    expect_accel_irq_status(0, "timed-invalid-command");
+    console_write("accel: invalid command error passed\n");
+
+    console_write("milestone 21: accelerator timeout/error handling\n");
+    thread_exit();
+}
+
+static void accel_timeout_worker_thread(void *arg)
+{
+    (void)arg;
+
+    while (!accel_timeout_submit_started) {
+        thread_yield();
+    }
+
+    while (!accel_timeout_observed) {
+        thread_yield();
+    }
+
+    platform_accel_step();
+    platform_dispatch_pending_irqs();
+    accel_timeout_late_irq_done = 1;
+
+    while (!accel_timeout_reuse_started) {
+        thread_yield();
+    }
+
+    for (;;) {
+        uint32_t status = 0;
+
+        platform_accel_step();
+        platform_dispatch_pending_irqs();
+        if (accel_get_status(&status) == ACCEL_OK &&
+            status == ACCEL_STATUS_DONE) {
+            break;
+        }
+        thread_yield();
+    }
+
+    accel_timeout_reuse_dispatched = 1;
+    thread_exit();
+}
+
+static void scenario_accelerator_timeout_error_handling(void)
+{
+    console_write("scenario: accelerator-timeout-error-handling\n");
+
+    void *cmd_page = page_alloc();
+    void *buffer_page = page_alloc();
+    if (cmd_page == NULL || buffer_page == NULL) {
+        PANIC("accelerator timeout pages unavailable");
+    }
+
+    memory_zero(cmd_page, PAGE_SIZE);
+    accel_timeout_buffer = buffer_page;
+    for (size_t i = 0; i < PAGE_SIZE; i++) {
+        accel_timeout_buffer[i] = 0xccu;
+    }
+
+    uint8_t *cmd_bytes = cmd_page;
+    accel_timeout_stuck_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 64u);
+    accel_timeout_reuse_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 128u);
+    accel_timeout_invalid_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 192u);
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator zero-timeout reset failed");
+    }
+    scenario_init_memset_cmd(
+        accel_timeout_stuck_cmd,
+        accel_timeout_buffer + 32u,
+        16u,
+        0x55u);
+    if (accel_submit_sync_timeout(accel_timeout_stuck_cmd, 0) !=
+            ACCEL_ERR_TIMEOUT ||
+        accel_timeout_stuck_cmd->status != ACCEL_CMD_STATUS_TIMEOUT) {
+        PANIC("accelerator zero timeout did not reject");
+    }
+    expect_accel_status(ACCEL_STATUS_IDLE, "zero-timeout");
+    expect_accel_irq_status(0, "zero-timeout");
+    console_write("accel: zero timeout rejected before start\n");
+
+    accel_timeout_submit_started = 0;
+    accel_timeout_observed = 0;
+    accel_timeout_late_irq_done = 0;
+    accel_timeout_reuse_started = 0;
+    accel_timeout_reuse_dispatched = 0;
+
+    thread_init();
+    if (thread_create("accel-timeout-submit", accel_timeout_submitter_thread, NULL) < 0 ||
+        thread_create("accel-timeout-worker", accel_timeout_worker_thread, NULL) < 0) {
+        PANIC("failed to create accelerator timeout threads");
+    }
+    thread_start();
+}
+
 void scenario_run(void)
 {
     if (CONFIG_SCENARIO == SCENARIO_ALLOCATOR) {
@@ -1257,6 +1454,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_IRQ_COMPLETION) {
         scenario_accelerator_irq_completion();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_TIMEOUT_ERROR_HANDLING) {
+        scenario_accelerator_timeout_error_handling();
     }
 
     PANIC("unknown kernel scenario");
