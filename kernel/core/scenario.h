@@ -12,6 +12,7 @@
 #define SCENARIO_DRIVER_FRAMEWORK 9
 #define SCENARIO_ACCEL_REGISTERS 10
 #define SCENARIO_ACCELERATOR_DESCRIPTORS 11
+#define SCENARIO_ACCELERATOR_IRQ_COMPLETION 12
 
 void scenario_run(void) __attribute__((noreturn));
 

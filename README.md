@@ -29,7 +29,8 @@ recoverable page-fault probes. Stage 4 has started with typed MMIO helpers,
 immutable platform device resources, a bounded runtime device registry,
 boot-time built-in driver probing, a simulated accelerator register model, and
 allocator-backed accelerator command descriptors for kernel-submitted `MEMSET`
-work.
+work. Accelerator descriptor completion now flows through simulated IRQ
+dispatch, the driver ISR, and wait queues.
 
 ## Project Goals
 
@@ -178,11 +179,14 @@ Stage 4 driver framework foundations are in progress:
 - simulated device execution of descriptor-backed `MEMSET`
 - explicit descriptor status for pending, success, invalid, error, and rejected
   commands
+- simulated platform IRQ dispatch through bound driver callbacks
+- interrupt-driven accelerator completion using a driver-owned request slot and
+  wait queue
+- ISR acknowledgement of accelerator completion/error IRQ status
 
 The next memory-related milestones are separate user address-space switching,
 syscall ABI growth, and a less temporary process/runtime model. The next Stage
-4 milestones are descriptor-based kernel submission, interrupt-driven
-completion, and timeout/error handling.
+4 milestone is timeout/error handling for the accelerator driver path.
 
 Common boot output:
 
@@ -284,6 +288,18 @@ accel: descriptor memset passed
 accel: descriptor validation passed
 accel: descriptor lifecycle rejection passed
 milestone 19: accelerator descriptors
+```
+
+Accelerator IRQ-completion scenario output:
+
+```text
+scenario: accelerator-irq-completion
+accel: submitter blocked before irq
+accel: competing submit rejected
+accel: irq completion woke submitter
+accel: reset allows descriptor reuse
+accel: spurious irq ack passed
+milestone 20: interrupt-driven accelerator completion
 ```
 
 Scheduler/synchronization scenario output:
@@ -437,6 +453,7 @@ make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accel-registers
 make test SCENARIO=accelerator-descriptors
+make test SCENARIO=accelerator-irq-completion
 make test SCENARIO=scheduler-sync
 ```
 
@@ -456,6 +473,7 @@ make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accel-registers
 make test SCENARIO=accelerator-descriptors
+make test SCENARIO=accelerator-irq-completion
 make clean
 make toolcheck
 ```
@@ -499,6 +517,9 @@ The current scenarios are:
 - `accelerator-descriptors`: validates descriptor-based `MEMSET` submission,
   allocator-managed page-contained descriptor and buffer validation, and
   lifecycle rejection before reset
+- `accelerator-irq-completion`: validates simulated IRQ dispatch, ISR
+  completion, wait-queue wakeup, competing-submit rejection, reset-before-reuse,
+  and spurious IRQ acknowledgement
 
 Stage 3 evidence matrix:
 
@@ -522,6 +543,7 @@ Stage 4 evidence matrix:
 | PR1 | MMIO and driver registration foundations | `driver-framework` | `milestone 17: driver framework` | `make test SCENARIO=driver-framework` |
 | PR2 | Simulated accelerator register model | `accel-registers` | `milestone 18: simulated accelerator registers` | `make test SCENARIO=accel-registers` |
 | PR3 | Command descriptor format and kernel submission API | `accelerator-descriptors` | `milestone 19: accelerator descriptors` | `make test SCENARIO=accelerator-descriptors` |
+| PR4 | Interrupt-driven completion path | `accelerator-irq-completion` | `milestone 20: interrupt-driven accelerator completion` | `make test SCENARIO=accelerator-irq-completion` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -541,7 +563,11 @@ synchronous start-to-done, IRQ acknowledgement without state reset, invalid
 start-after-done error handling, and reset priority over start. The
 accelerator-descriptor scenario proves allocator-backed descriptor submission,
 safe page-contained execution, invalid descriptor/range rejection, and
-deterministic lifecycle rejection before reset.
+deterministic lifecycle rejection before reset. The accelerator IRQ-completion
+scenario proves that descriptor completion can block on driver-owned request
+state, wake through the simulated IRQ dispatch and ISR path, reject a competing
+submitter while the slot is owned, preserve reset-before-reuse behavior, and
+ack a spurious accelerator IRQ without an active request.
 
 Planned test categories:
 

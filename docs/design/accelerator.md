@@ -7,10 +7,11 @@ claiming to model a real GPU, NIC, storage controller, or NPU. The register
 model milestone introduced a hardware-like MMIO device with deterministic
 status, control, and interrupt-status behavior. The descriptor milestone adds a
 kernel submission API and one command operation over allocator-managed physical
-memory.
+memory. The IRQ-completion milestone routes descriptor completion through the
+driver ISR and wait queues.
 
-This stage still does not implement blocking completion, real external
-interrupt dispatch, userspace syscalls, or throughput measurements. Those
+This stage still does not implement real external interrupt-controller
+delivery, userspace syscalls, timeout policy, or throughput measurements. Those
 belong to later Stage 4 and Stage 5 work.
 
 ## Register Layout
@@ -47,7 +48,8 @@ ERROR
 acknowledgement clears notification bits only; it does not reset operation
 state.
 
-The current model completes synchronously:
+The simulated device itself completes a started operation when
+`platform_accel_step()` advances it:
 
 ```text
 START from IDLE:
@@ -55,10 +57,11 @@ START from IDLE:
   IRQ_STATUS = DONE
 ```
 
-This synchronous completion validates register semantics without introducing
-delayed completion, wait queues, or interrupt dispatch yet. Later milestones may
-replace the immediate completion policy with delayed or interrupt-driven
-progress while preserving the register vocabulary.
+Earlier milestones called the step hook from register helpers. Descriptor
+submission no longer steps the device from `accel_submit_sync()`: a separate
+simulated hardware context must advance the device and dispatch pending IRQs.
+Later milestones may replace the explicit worker-driven step with timer-driven
+or real external interrupt progress while preserving the register vocabulary.
 
 Descriptor submission uses the same lifecycle:
 
@@ -67,7 +70,8 @@ RESET -> IDLE
 driver validates descriptor and buffer
 driver writes ACCEL_CMD_BASE
 driver writes START
-platform simulation executes one step
+separate simulator context executes one step
+platform dispatch invokes driver ISR
 DONE or ERROR
 RESET required before the next command
 ```
@@ -90,9 +94,10 @@ consumed.
 ## Platform Simulation Hook
 
 The accelerator backing registers live in
-`kernel/arch/riscv64/accel_platform.c`. The driver writes MMIO registers through
-the shared MMIO helpers, then calls `platform_accel_step()` to model the
-hardware reacting to the consumed control or ack register.
+`kernel/arch/riscv64/accel_platform.c`. Register-level helper paths still call
+`platform_accel_step()` after raw control or ack writes to model hardware
+reacting to the consumed register. The descriptor submit path writes `START`
+and blocks; simulator code advances hardware separately.
 
 This hook is an explicit simulation compromise. The fake hardware is backed by
 ordinary static kernel memory, not an independent QEMU bus device that can react
@@ -103,6 +108,43 @@ driver owns register interpretation and kernel-facing operations.
 For descriptor work, the driver fences ordinary descriptor writes before
 writing MMIO registers. This preserves the invariant that descriptor contents
 are published before the device is started.
+
+## Interrupt-Driven Completion
+
+`accel_submit_sync()` now uses interrupt-driven completion internally while
+preserving the public contract that it returns after the command is complete.
+The driver owns one static in-flight request slot:
+
+```text
+descriptor pointer
+completion wait queue
+in-use flag
+completed predicate
+result code
+```
+
+The slot is protected with `irq_save()` critical sections, matching the
+single-hart scheduler and wait-queue style already used by mutexes. The
+submitter claims the slot before ringing the device doorbell and releases it
+only after waking and reading the result. A second submitter while the slot is
+owned receives `ACCEL_ERR_BUSY` and descriptor status `REJECTED`.
+
+The wait condition is driver-owned request state, not the device-owned
+descriptor status. The ISR bridges the two:
+
+```text
+read IRQ_STATUS
+if no active request, ack known bits and return
+read device status and descriptor status
+record request result
+set completed predicate
+ack IRQ bits
+wake waiters
+```
+
+Acknowledgement happens in the ISR so stale IRQ bits do not poison the next
+submit. The ISR does not reset the device. After completion, the device remains
+in `DONE` or `ERROR`, and callers must reset before submitting again.
 
 ## Driver API
 
@@ -156,6 +198,7 @@ only the low 8 bits are consumed.
   page
 - device status is `IDLE`
 - IRQ status is zero
+- no other accelerator request is in flight
 
 The page allocator helper proves that a physical byte range sits inside the
 allocator-managed RAM window and does not cross a page boundary. It does not
@@ -211,6 +254,8 @@ The `accelerator-descriptors` scenario verifies:
 - page-crossing destination range is rejected
 - unmanaged, unaligned, and page-crossing descriptor locations are rejected
 - second submit without reset is rejected with descriptor status `REJECTED`
+- descriptor submission still succeeds when a separate simulator worker
+  advances the device and dispatches the pending IRQ
 
 The scenario prints:
 
@@ -222,6 +267,30 @@ accel: descriptor lifecycle rejection passed
 milestone 19: accelerator descriptors
 ```
 
+The `accelerator-irq-completion` scenario verifies:
+
+- submitter holds the driver request slot before simulated IRQ delivery
+- competing submitter is rejected while the slot is owned
+- simulator worker explicitly calls `platform_accel_step()` and
+  `platform_dispatch_pending_irqs()`
+- driver ISR records completion, acks IRQ status, and wakes the blocked
+  submitter
+- completion leaves the device in `DONE` with IRQ status cleared
+- reset is still required before descriptor reuse
+- spurious raw accelerator IRQ with no active request is acked and ignored
+
+The scenario prints:
+
+```text
+scenario: accelerator-irq-completion
+accel: submitter blocked before irq
+accel: competing submit rejected
+accel: irq completion woke submitter
+accel: reset allows descriptor reuse
+accel: spurious irq ack passed
+milestone 20: interrupt-driven accelerator completion
+```
+
 ## Course Connection
 
 The ECE350 connection is the distinction between a condition and a notification.
@@ -229,7 +298,13 @@ The ECE350 connection is the distinction between a condition and a notification.
 software has a pending notification to acknowledge. Clearing the notification
 does not consume or reset the condition.
 
+The wait-queue connection is the lost-wakeup invariant: the submitter checks
+the driver-owned `completed` predicate and sleeps while interrupts are masked,
+so the ISR cannot complete and wake between the check and wait enqueue on this
+single-hart kernel.
+
 The STM32 RTOS analogy is a peripheral driver wrapping register protocols behind
-meaningful operations. The analogy breaks because this device is simulated in
-kernel memory and uses an explicit step hook; a real MCU peripheral or QEMU
+meaningful operations, then using an interrupt handler to complete a blocked
+caller. The analogy breaks because this device is simulated in kernel memory
+and uses an explicit worker-driven step hook; a real MCU peripheral or QEMU
 device would react independently to bus writes.

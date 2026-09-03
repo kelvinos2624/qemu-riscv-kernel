@@ -1,3 +1,4 @@
+#include "arch/riscv64/accel_platform.h"
 #include "arch/riscv64/csr.h"
 #include "core/kernel.h"
 #include "core/scenario.h"
@@ -8,6 +9,7 @@
 #include "drivers/accel.h"
 #include "drivers/accel_cmd.h"
 #include "drivers/device.h"
+#include "drivers/platform.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
 #include "memory/paging.h"
@@ -22,6 +24,17 @@
 static mutex_t demo_mutex;
 static volatile int demo_shared_counter;
 static accel_cmd_t static_accel_cmd;
+static uint8_t *accel_desc_cmd_bytes;
+static accel_cmd_t *accel_desc_cmd;
+static uint8_t *accel_desc_buffer;
+static volatile int accel_desc_submit_started;
+static accel_cmd_t *accel_irq_primary_cmd;
+static accel_cmd_t *accel_irq_competing_cmd;
+static uint8_t *accel_irq_buffer;
+static volatile int accel_irq_submitter_started;
+static volatile int accel_irq_competitor_done;
+static volatile int accel_irq_worker_dispatched;
+static volatile int accel_irq_reuse_started;
 
 static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
@@ -35,6 +48,7 @@ static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
 static void scenario_accel_registers(void) __attribute__((noreturn));
 static void scenario_accelerator_descriptors(void) __attribute__((noreturn));
+static void scenario_accelerator_irq_completion(void) __attribute__((noreturn));
 
 extern char first_user_start[];
 extern char first_user_end[];
@@ -79,6 +93,27 @@ static void scenario_init_memset_cmd(
     cmd->value = value;
     cmd->status = ACCEL_CMD_STATUS_ERROR;
     cmd->reserved = 0;
+}
+
+static void scenario_expect_memset_range(
+    uint8_t *page,
+    size_t offset,
+    uint32_t len,
+    uint8_t value)
+{
+    if (offset == 0 || offset + len >= PAGE_SIZE) {
+        PANIC("invalid memset verification range");
+    }
+
+    if (page[offset - 1u] != 0xccu || page[offset + len] != 0xccu) {
+        PANIC("accelerator memset overflowed buffer");
+    }
+
+    for (uint32_t i = 0; i < len; i++) {
+        if (page[offset + i] != value) {
+            PANIC("accelerator memset wrote wrong value");
+        }
+    }
 }
 
 static void scenario_idle_forever(void)
@@ -896,25 +931,14 @@ static void scenario_accel_registers(void)
     scenario_idle_forever();
 }
 
-static void scenario_accelerator_descriptors(void)
+static void accel_descriptor_submitter_thread(void *arg)
 {
-    console_write("scenario: accelerator-descriptors\n");
+    (void)arg;
 
-    void *cmd_page = page_alloc();
-    void *buffer_page = page_alloc();
-    if (cmd_page == NULL || buffer_page == NULL) {
-        PANIC("accelerator descriptor pages unavailable");
-    }
-
-    memory_zero(cmd_page, PAGE_SIZE);
-    uint8_t *buffer = buffer_page;
-    for (size_t i = 0; i < PAGE_SIZE; i++) {
-        buffer[i] = 0xccu;
-    }
-
-    uint8_t *cmd_bytes = cmd_page;
-    accel_cmd_t *cmd = (accel_cmd_t *)(void *)(cmd_bytes + 64u);
-    uint8_t *dst = buffer + 37u;
+    uint8_t *cmd_bytes = accel_desc_cmd_bytes;
+    uint8_t *buffer = accel_desc_buffer;
+    accel_cmd_t *cmd = accel_desc_cmd;
+    uint8_t *dst = accel_desc_buffer + 37u;
     const uint32_t len = 64u;
 
     if (accel_reset() != ACCEL_OK) {
@@ -922,12 +946,13 @@ static void scenario_accelerator_descriptors(void)
     }
 
     scenario_init_memset_cmd(cmd, dst, len, 0x1234565au);
+    accel_desc_submit_started = 1;
     if (accel_submit_sync(cmd) != ACCEL_OK ||
         cmd->status != ACCEL_CMD_STATUS_OK) {
         PANIC("accelerator descriptor memset failed");
     }
     expect_accel_status(ACCEL_STATUS_DONE, "descriptor-memset");
-    expect_accel_irq_status(ACCEL_IRQ_DONE, "descriptor-memset");
+    expect_accel_irq_status(0, "descriptor-memset");
 
     if (buffer[36] != 0xccu || buffer[37u + len] != 0xccu) {
         PANIC("accelerator descriptor memset overflowed buffer");
@@ -944,8 +969,7 @@ static void scenario_accelerator_descriptors(void)
         PANIC("accelerator descriptor lifecycle rejection failed");
     }
 
-    if (accel_ack_irq(ACCEL_IRQ_DONE) != ACCEL_OK ||
-        accel_reset() != ACCEL_OK) {
+    if (accel_reset() != ACCEL_OK) {
         PANIC("accelerator descriptor cleanup failed");
     }
 
@@ -985,8 +1009,199 @@ static void scenario_accelerator_descriptors(void)
     console_write("accel: descriptor validation passed\n");
     console_write("accel: descriptor lifecycle rejection passed\n");
     console_write("milestone 19: accelerator descriptors\n");
+    thread_exit();
+}
 
-    scenario_idle_forever();
+static void accel_descriptor_worker_thread(void *arg)
+{
+    (void)arg;
+
+    while (!accel_desc_submit_started) {
+        thread_yield();
+    }
+
+    platform_accel_step();
+    platform_dispatch_pending_irqs();
+    thread_exit();
+}
+
+static void scenario_accelerator_descriptors(void)
+{
+    console_write("scenario: accelerator-descriptors\n");
+
+    void *cmd_page = page_alloc();
+    void *buffer_page = page_alloc();
+    if (cmd_page == NULL || buffer_page == NULL) {
+        PANIC("accelerator descriptor pages unavailable");
+    }
+
+    memory_zero(cmd_page, PAGE_SIZE);
+    accel_desc_buffer = buffer_page;
+    for (size_t i = 0; i < PAGE_SIZE; i++) {
+        accel_desc_buffer[i] = 0xccu;
+    }
+
+    uint8_t *cmd_bytes = cmd_page;
+    accel_desc_cmd_bytes = cmd_bytes;
+    accel_desc_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 64u);
+    accel_desc_submit_started = 0;
+
+    thread_init();
+    if (thread_create("accel-desc-submit", accel_descriptor_submitter_thread, NULL) < 0 ||
+        thread_create("accel-desc-worker", accel_descriptor_worker_thread, NULL) < 0) {
+        PANIC("failed to create accelerator descriptor threads");
+    }
+    thread_start();
+}
+
+static void accel_irq_submitter_thread(void *arg)
+{
+    (void)arg;
+
+    const size_t first_offset = 53u;
+    const uint32_t first_len = 80u;
+    scenario_init_memset_cmd(
+        accel_irq_primary_cmd,
+        accel_irq_buffer + first_offset,
+        first_len,
+        0x11111144u);
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator irq reset failed");
+    }
+
+    accel_irq_submitter_started = 1;
+    if (accel_submit_sync(accel_irq_primary_cmd) != ACCEL_OK ||
+        accel_irq_primary_cmd->status != ACCEL_CMD_STATUS_OK) {
+        PANIC("accelerator irq submit failed");
+    }
+    if (!accel_irq_worker_dispatched) {
+        PANIC("accelerator irq submit returned before dispatch");
+    }
+    scenario_expect_memset_range(accel_irq_buffer, first_offset, first_len, 0x44u);
+    expect_accel_status(ACCEL_STATUS_DONE, "irq-completion");
+    expect_accel_irq_status(0, "irq-completion");
+    console_write("accel: irq completion woke submitter\n");
+
+    scenario_init_memset_cmd(
+        accel_irq_primary_cmd,
+        accel_irq_buffer + 200u,
+        32u,
+        0x55u);
+    if (accel_submit_sync(accel_irq_primary_cmd) != ACCEL_ERR_BUSY ||
+        accel_irq_primary_cmd->status != ACCEL_CMD_STATUS_REJECTED) {
+        PANIC("accelerator irq submit without reset accepted");
+    }
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator irq reuse reset failed");
+    }
+    scenario_init_memset_cmd(
+        accel_irq_primary_cmd,
+        accel_irq_buffer + 200u,
+        32u,
+        0x55u);
+    accel_irq_reuse_started = 1;
+    if (accel_submit_sync(accel_irq_primary_cmd) != ACCEL_OK ||
+        accel_irq_primary_cmd->status != ACCEL_CMD_STATUS_OK) {
+        PANIC("accelerator irq reuse submit failed");
+    }
+    scenario_expect_memset_range(accel_irq_buffer, 200u, 32u, 0x55u);
+    expect_accel_status(ACCEL_STATUS_DONE, "irq-reuse");
+    expect_accel_irq_status(0, "irq-reuse");
+    console_write("accel: reset allows descriptor reuse\n");
+
+    if (accel_reset() != ACCEL_OK ||
+        accel_start_selftest() != ACCEL_OK) {
+        PANIC("accelerator spurious irq setup failed");
+    }
+    expect_accel_irq_status(ACCEL_IRQ_DONE, "spurious-before-dispatch");
+    platform_dispatch_pending_irqs();
+    expect_accel_irq_status(0, "spurious-after-dispatch");
+    console_write("accel: spurious irq ack passed\n");
+    console_write("milestone 20: interrupt-driven accelerator completion\n");
+    thread_exit();
+}
+
+static void accel_irq_competing_thread(void *arg)
+{
+    (void)arg;
+
+    while (!accel_irq_submitter_started) {
+        thread_yield();
+    }
+
+    scenario_init_memset_cmd(
+        accel_irq_competing_cmd,
+        accel_irq_buffer + 400u,
+        16u,
+        0x66u);
+    if (accel_submit_sync(accel_irq_competing_cmd) != ACCEL_ERR_BUSY ||
+        accel_irq_competing_cmd->status != ACCEL_CMD_STATUS_REJECTED) {
+        PANIC("accelerator competing submit was not rejected");
+    }
+    if (accel_irq_worker_dispatched) {
+        PANIC("accelerator worker dispatched too early");
+    }
+
+    console_write("accel: submitter blocked before irq\n");
+    console_write("accel: competing submit rejected\n");
+    accel_irq_competitor_done = 1;
+    thread_exit();
+}
+
+static void accel_irq_worker_thread(void *arg)
+{
+    (void)arg;
+
+    while (!accel_irq_competitor_done) {
+        thread_yield();
+    }
+
+    platform_accel_step();
+    platform_dispatch_pending_irqs();
+    accel_irq_worker_dispatched = 1;
+
+    while (!accel_irq_reuse_started) {
+        thread_yield();
+    }
+
+    platform_accel_step();
+    platform_dispatch_pending_irqs();
+    thread_exit();
+}
+
+static void scenario_accelerator_irq_completion(void)
+{
+    console_write("scenario: accelerator-irq-completion\n");
+
+    void *cmd_page = page_alloc();
+    void *buffer_page = page_alloc();
+    if (cmd_page == NULL || buffer_page == NULL) {
+        PANIC("accelerator irq pages unavailable");
+    }
+
+    memory_zero(cmd_page, PAGE_SIZE);
+    accel_irq_buffer = buffer_page;
+    for (size_t i = 0; i < PAGE_SIZE; i++) {
+        accel_irq_buffer[i] = 0xccu;
+    }
+
+    uint8_t *cmd_bytes = cmd_page;
+    accel_irq_primary_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 64u);
+    accel_irq_competing_cmd = (accel_cmd_t *)(void *)(cmd_bytes + 128u);
+    accel_irq_submitter_started = 0;
+    accel_irq_competitor_done = 0;
+    accel_irq_worker_dispatched = 0;
+    accel_irq_reuse_started = 0;
+
+    thread_init();
+    if (thread_create("accel-submit", accel_irq_submitter_thread, NULL) < 0 ||
+        thread_create("accel-compete", accel_irq_competing_thread, NULL) < 0 ||
+        thread_create("accel-worker", accel_irq_worker_thread, NULL) < 0) {
+        PANIC("failed to create accelerator irq threads");
+    }
+    thread_start();
 }
 
 void scenario_run(void)
@@ -1033,6 +1248,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_DESCRIPTORS) {
         scenario_accelerator_descriptors();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_ACCELERATOR_IRQ_COMPLETION) {
+        scenario_accelerator_irq_completion();
     }
 
     PANIC("unknown kernel scenario");

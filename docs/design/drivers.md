@@ -96,14 +96,30 @@ The first compatible lookup is intentionally a convenience API for singleton
 devices. Multi-instance users should prefer exact name lookup until an iterator
 or indexed compatible lookup exists.
 
-## IRQ Metadata
+## IRQ Dispatch
 
 PR 1 defines `irq_t`, `IRQ_NONE`, and `irq_handler_t`, and drivers may declare
-an IRQ handler callback. No external interrupt registration or dispatch path
-invokes those callbacks yet.
+an IRQ handler callback. PR 4 adds a generic dispatch mechanism:
 
-This keeps the descriptor shape ready for later accelerator completion work
-without pretending that PLIC/external interrupt routing is implemented.
+```c
+int device_dispatch_irq(irq_t irq);
+```
+
+Dispatch scans the bounded runtime device registry and invokes the bound
+driver callback for the matching IRQ. It returns `1` when a handler was called
+and `0` when no bound handler exists. The dispatch layer does not decide
+whether an unhandled IRQ is fatal.
+
+The current platform description enforces a unique non-`IRQ_NONE` IRQ
+invariant during `device_init()`. Shared IRQ lines are deferred because the
+current `irq_handler_t` callback does not report claimed/unclaimed status.
+
+The RISC-V platform simulation exposes `platform_dispatch_pending_irqs()`.
+That helper inspects simulated platform interrupt sources and calls
+`device_dispatch_irq()`. It panics if simulated hardware has a pending IRQ that
+no bound driver handles. This is still not real PLIC/external interrupt
+delivery; a future PLIC path should be able to call `device_dispatch_irq()` with
+a claimed hardware IRQ.
 
 ## Boot Integration
 
@@ -131,7 +147,7 @@ The `driver-framework` scenario validates observable behavior:
 - successful driver binding after boot-time probing
 - accelerator driver probe validates a device ID register through MMIO helpers
 - scenario exercises an MMIO-backed accelerator operation through the driver API
-- IRQ metadata and callback shape exist but are not dispatched
+- IRQ metadata and callback shape exist for later dispatch scenarios
 
 The scenario prints:
 
@@ -153,5 +169,6 @@ which task should run.
 The STM32 RTOS connection is the fixed platform resource model. MCU peripheral
 base addresses are platform facts, while drivers interpret registers and expose
 kernel services. The analogy breaks at interrupt routing: STM32 NVIC setup is
-not the same as RISC-V external interrupt and PLIC delivery, so Stage 4 defers
-real external IRQ dispatch until the accelerator completion milestone.
+not the same as RISC-V external interrupt and PLIC delivery. The current
+simulated IRQ dispatch models the software-side handler handoff, not the real
+interrupt-controller claim path.

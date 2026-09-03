@@ -120,6 +120,11 @@ const device_resource_t *platform_accel_resource(void)
     return &accel_resource;
 }
 
+int platform_accel_irq_pending(void)
+{
+    return accel_mmio.irq_status != 0;
+}
+
 void platform_accel_step(void)
 {
     const uint32_t control = accel_mmio.control;

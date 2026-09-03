@@ -133,6 +133,20 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "accelerator descriptor scenario",
     },
+    "accelerator-irq-completion": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: accelerator-irq-completion",
+            "accel: submitter blocked before irq",
+            "accel: competing submit rejected",
+            "accel: irq completion woke submitter",
+            "accel: reset allows descriptor reuse",
+            "accel: spurious irq ack passed",
+            "milestone 20: interrupt-driven accelerator completion",
+        ],
+        "required_trace_types": [],
+        "success": "accelerator irq completion scenario",
+    },
 }
 TIMEOUT_SECONDS = 15.0
 
@@ -150,6 +164,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 17:")
         or line.startswith("milestone 18:")
         or line.startswith("milestone 19:")
+        or line.startswith("milestone 20:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")

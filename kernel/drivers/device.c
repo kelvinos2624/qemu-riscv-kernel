@@ -35,6 +35,22 @@ static size_t built_in_driver_count(void)
     return sizeof(built_in_drivers) / sizeof(built_in_drivers[0]);
 }
 
+static void device_validate_unique_irqs(void)
+{
+    for (size_t i = 0; i < device_count; i++) {
+        const irq_t irq = devices[i].resource->irq;
+        if (irq == IRQ_NONE) {
+            continue;
+        }
+
+        for (size_t j = i + 1u; j < device_count; j++) {
+            if (devices[j].resource->irq == irq) {
+                PANIC("duplicate platform irq");
+            }
+        }
+    }
+}
+
 void device_init(void)
 {
     if (devices_initialized) {
@@ -55,6 +71,7 @@ void device_init(void)
     }
 
     device_count = resource_count;
+    device_validate_unique_irqs();
     devices_initialized = 1;
 }
 
@@ -154,4 +171,27 @@ irq_t device_irq(const device_t *dev)
 const driver_t *device_driver(const device_t *dev)
 {
     return dev == NULL ? NULL : dev->driver;
+}
+
+int device_dispatch_irq(irq_t irq)
+{
+    if (irq == IRQ_NONE) {
+        return 0;
+    }
+
+    device_init();
+
+    for (size_t i = 0; i < device_count; i++) {
+        device_t *dev = &devices[i];
+        if (dev->resource->irq != irq ||
+            dev->driver == NULL ||
+            dev->driver->irq_handler == NULL) {
+            continue;
+        }
+
+        dev->driver->irq_handler(dev);
+        return 1;
+    }
+
+    return 0;
 }
