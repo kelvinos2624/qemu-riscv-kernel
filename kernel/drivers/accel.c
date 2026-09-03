@@ -1,10 +1,22 @@
 #include "arch/riscv64/accel_platform.h"
+#include "arch/riscv64/irq.h"
+#include "core/thread.h"
 #include "drivers/accel.h"
 #include "drivers/accel_cmd.h"
 #include "drivers/mmio.h"
 #include "memory/page_alloc.h"
 
 _Static_assert(sizeof(accel_cmd_t) == 32u, "accelerator command descriptor size");
+
+typedef struct accel_request_state {
+    accel_cmd_t *cmd;
+    wait_queue_t waiters;
+    int in_use;
+    int completed;
+    int result;
+} accel_request_state_t;
+
+static accel_request_state_t accel_request;
 
 static device_t *accel_device(void)
 {
@@ -19,12 +31,54 @@ static device_t *accel_device(void)
 static int accel_probe(device_t *dev)
 {
     const uint32_t id = mmio_read32(device_mmio_base(dev) + ACCEL_REG_ID);
-    return id == ACCEL_DEVICE_ID_VALUE ? 0 : -1;
+    if (id != ACCEL_DEVICE_ID_VALUE) {
+        return -1;
+    }
+
+    wait_queue_init(&accel_request.waiters, "accel-request");
+    accel_request.cmd = NULL;
+    accel_request.in_use = 0;
+    accel_request.completed = 0;
+    accel_request.result = ACCEL_ERR_IO;
+    return 0;
 }
 
 static void accel_irq_handler(device_t *dev)
 {
-    (void)dev;
+    const uintptr_t base = device_mmio_base(dev);
+    const uint32_t irq_status = mmio_read32(base + ACCEL_REG_IRQ_STATUS);
+    mmio_fence_after_device_read();
+
+    const uint32_t known_irq = irq_status & (ACCEL_IRQ_DONE | ACCEL_IRQ_ERROR);
+    if (known_irq == 0) {
+        return;
+    }
+
+    irq_state_t irq_state = irq_save();
+    if (!accel_request.in_use || accel_request.cmd == NULL) {
+        mmio_fence_before_device_write();
+        mmio_write32(base + ACCEL_REG_IRQ_ACK, known_irq);
+        platform_accel_step();
+        irq_restore(irq_state);
+        return;
+    }
+
+    const uint32_t status = mmio_read32(base + ACCEL_REG_STATUS);
+    mmio_fence_after_device_read();
+    if ((irq_status & ACCEL_IRQ_DONE) != 0 &&
+        status == ACCEL_STATUS_DONE &&
+        accel_request.cmd->status == ACCEL_CMD_STATUS_OK) {
+        accel_request.result = ACCEL_OK;
+    } else {
+        accel_request.result = ACCEL_ERR_IO;
+    }
+    accel_request.completed = 1;
+
+    mmio_fence_before_device_write();
+    mmio_write32(base + ACCEL_REG_IRQ_ACK, known_irq);
+    platform_accel_step();
+    wait_queue_wake_all(&accel_request.waiters);
+    irq_restore(irq_state);
 }
 
 static int accel_cmd_pointer_is_safe(const accel_cmd_t *cmd)
@@ -120,9 +174,16 @@ int accel_ack_irq(uint32_t mask)
         return ACCEL_ERR_NO_DEVICE;
     }
 
+    irq_state_t irq_state = irq_save();
+    if (accel_request.in_use) {
+        irq_restore(irq_state);
+        return ACCEL_ERR_BUSY;
+    }
+
     mmio_fence_before_device_write();
     mmio_write32(device_mmio_base(dev) + ACCEL_REG_IRQ_ACK, mask);
     platform_accel_step();
+    irq_restore(irq_state);
     return ACCEL_OK;
 }
 
@@ -138,9 +199,16 @@ int accel_write_control_raw(uint32_t control)
         return ACCEL_ERR_NO_DEVICE;
     }
 
+    irq_state_t irq_state = irq_save();
+    if (accel_request.in_use) {
+        irq_restore(irq_state);
+        return ACCEL_ERR_BUSY;
+    }
+
     mmio_fence_before_device_write();
     mmio_write32(device_mmio_base(dev) + ACCEL_REG_CONTROL, control);
     platform_accel_step();
+    irq_restore(irq_state);
     return ACCEL_OK;
 }
 
@@ -160,12 +228,25 @@ int accel_submit_sync(accel_cmd_t *cmd)
         return ACCEL_ERR_INVALID;
     }
 
-    if (!accel_device_is_ready(dev)) {
+    const uintptr_t base = device_mmio_base(dev);
+
+    irq_state_t irq_state = irq_save();
+    if (accel_request.in_use) {
         cmd->status = ACCEL_CMD_STATUS_REJECTED;
+        irq_restore(irq_state);
         return ACCEL_ERR_BUSY;
     }
 
-    const uintptr_t base = device_mmio_base(dev);
+    if (!accel_device_is_ready(dev)) {
+        cmd->status = ACCEL_CMD_STATUS_REJECTED;
+        irq_restore(irq_state);
+        return ACCEL_ERR_BUSY;
+    }
+
+    accel_request.cmd = cmd;
+    accel_request.in_use = 1;
+    accel_request.completed = 0;
+    accel_request.result = ACCEL_ERR_IO;
     cmd->status = ACCEL_CMD_STATUS_PENDING;
 
     mmio_fence_before_device_write();
@@ -173,14 +254,16 @@ int accel_submit_sync(accel_cmd_t *cmd)
     mmio_fence_before_device_write();
     mmio_write32(base + ACCEL_REG_CONTROL, ACCEL_CONTROL_START);
 
-    platform_accel_step();
-
-    const uint32_t status = mmio_read32(base + ACCEL_REG_STATUS);
-    mmio_fence_after_device_read();
-
-    if (status == ACCEL_STATUS_DONE && cmd->status == ACCEL_CMD_STATUS_OK) {
-        return ACCEL_OK;
+    while (!accel_request.completed) {
+        wait_queue_sleep(&accel_request.waiters);
     }
 
-    return ACCEL_ERR_IO;
+    const int result = accel_request.result;
+    accel_request.cmd = NULL;
+    accel_request.in_use = 0;
+    accel_request.completed = 0;
+    accel_request.result = ACCEL_ERR_IO;
+
+    irq_restore(irq_state);
+    return result;
 }

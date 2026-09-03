@@ -43,6 +43,7 @@ typedef struct driver_probe_result {
 
 void device_init(void);
 driver_probe_result_t driver_probe_all(void);
+int device_dispatch_irq(irq_t irq);
 device_t *device_find_by_name(const char *name);
 device_t *device_find_by_compatible(const char *compatible);
 int device_is_bound(const device_t *dev);
