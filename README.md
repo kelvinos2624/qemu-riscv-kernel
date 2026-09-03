@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[##################--] 92%`
+Progress: `[###################-] 96%`
 
 The kernel currently boots on QEMU `virt` with `-bios none`, builds an
 identity-mapped Sv39 kernel page table, enters S-mode, initializes UART output,
@@ -25,13 +25,12 @@ timeout-aware blocking, structured scheduler tracing, a bitmap physical page
 allocator, a page-backed size-class kernel heap, Sv39 page-table primitives,
 hardware kernel paging, diagnostic S-mode page-fault handling, a minimal
 U-mode task, delegated user `ecall` exit, and safe usercopy with narrowly
-recoverable page-fault probes. Stage 4 has started with typed MMIO helpers,
+recoverable page-fault probes. Stage 4 is complete with typed MMIO helpers,
 immutable platform device resources, a bounded runtime device registry,
-boot-time built-in driver probing, a simulated accelerator register model, and
+boot-time built-in driver probing, a simulated accelerator register model,
 allocator-backed accelerator command descriptors for kernel-submitted `MEMSET`
-work. Accelerator descriptor completion now flows through simulated IRQ
-dispatch, the driver ISR, and wait queues, with explicit timeout/error handling
-and reset-required recovery.
+work, interrupt-driven completion through simulated IRQ dispatch, and explicit
+timeout/error handling with reset-required recovery.
 
 ## Project Goals
 
@@ -159,7 +158,7 @@ Stage 3 virtual memory and allocation foundations are complete:
 - `SSTATUS_SUM` enabled only inside the interrupt-masked copy window
 - cross-page usercopy scenario coverage
 
-Stage 4 driver framework foundations are in progress:
+Stage 4 driver framework and simulated accelerator work is complete:
 
 - typed volatile MMIO helpers for 8/16/32/64-bit register access
 - explicit RISC-V fence helpers and semantic driver-ordering wrappers
@@ -191,8 +190,8 @@ Stage 4 driver framework foundations are in progress:
   rewrite
 
 The next memory-related milestones are separate user address-space switching,
-syscall ABI growth, and a less temporary process/runtime model. The next Stage
-4 milestone is integration cleanup before userspace runtime work.
+syscall ABI growth, and a less temporary process/runtime model. The next
+project milestone is Stage 5 userspace runtime work.
 
 Common boot output:
 
@@ -278,7 +277,7 @@ milestone 17: driver framework
 Accelerator-register scenario output:
 
 ```text
-scenario: accel-registers
+scenario: accelerator-registers
 accel: reset idle
 accel: start done
 accel: invalid transition error
@@ -306,6 +305,19 @@ accel: irq completion woke submitter
 accel: reset allows descriptor reuse
 accel: spurious irq ack passed
 milestone 20: interrupt-driven accelerator completion
+```
+
+Accelerator timeout/error-handling scenario output:
+
+```text
+scenario: accelerator-timeout-error-handling
+accel: zero timeout rejected before start
+accel: stuck request timed out
+accel: reset required after timeout
+accel: late irq after timeout acked
+accel: timed submit completed before timeout
+accel: invalid command error passed
+milestone 21: accelerator timeout/error handling
 ```
 
 Scheduler/synchronization scenario output:
@@ -458,9 +470,10 @@ make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
-make test SCENARIO=accel-registers
+make test SCENARIO=accelerator-registers
 make test SCENARIO=accelerator-descriptors
 make test SCENARIO=accelerator-irq-completion
+make test SCENARIO=accelerator-timeout-error-handling
 make test SCENARIO=scheduler-sync
 ```
 
@@ -478,9 +491,11 @@ make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
-make test SCENARIO=accel-registers
+make test SCENARIO=accelerator-registers
 make test SCENARIO=accelerator-descriptors
 make test SCENARIO=accelerator-irq-completion
+make test SCENARIO=accelerator-timeout-error-handling
+make test-stage4
 make clean
 make toolcheck
 ```
@@ -519,7 +534,7 @@ The current scenarios are:
   scheduler trace events
 - `driver-framework`: validates platform/device/driver boundary separation,
   boot-time compatible accelerator binding, and typed MMIO helper behavior
-- `accel-registers`: validates the simulated accelerator register state
+- `accelerator-registers`: validates the simulated accelerator register state
   machine, reset priority, IRQ acknowledgement, and invalid transition behavior
 - `accelerator-descriptors`: validates descriptor-based `MEMSET` submission,
   allocator-managed page-contained descriptor and buffer validation, and
@@ -551,10 +566,11 @@ Stage 4 evidence matrix:
 | PR | Capability | Scenario | Smoke marker | Command |
 | --- | --- | --- | --- | --- |
 | PR1 | MMIO and driver registration foundations | `driver-framework` | `milestone 17: driver framework` | `make test SCENARIO=driver-framework` |
-| PR2 | Simulated accelerator register model | `accel-registers` | `milestone 18: simulated accelerator registers` | `make test SCENARIO=accel-registers` |
+| PR2 | Simulated accelerator register model | `accelerator-registers` | `milestone 18: simulated accelerator registers` | `make test SCENARIO=accelerator-registers` |
 | PR3 | Command descriptor format and kernel submission API | `accelerator-descriptors` | `milestone 19: accelerator descriptors` | `make test SCENARIO=accelerator-descriptors` |
 | PR4 | Interrupt-driven completion path | `accelerator-irq-completion` | `milestone 20: interrupt-driven accelerator completion` | `make test SCENARIO=accelerator-irq-completion` |
 | PR5 | Timeout and error handling | `accelerator-timeout-error-handling` | `milestone 21: accelerator timeout/error handling` | `make test SCENARIO=accelerator-timeout-error-handling` |
+| PR6 | Stage 4 integration cleanup | all Stage 4 scenarios | milestones 17-21 | `make test-stage4` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the

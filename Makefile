@@ -11,10 +11,24 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync driver-framework accel-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+STAGE4_SCENARIOS := driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter first-user,$(SCENARIO)),6,$(if $(filter usercopy,$(SCENARIO)),7,$(if $(filter scheduler-sync,$(SCENARIO)),8,$(if $(filter driver-framework,$(SCENARIO)),9,$(if $(filter accel-registers,$(SCENARIO)),10,$(if $(filter accelerator-descriptors,$(SCENARIO)),11,$(if $(filter accelerator-irq-completion,$(SCENARIO)),12,$(if $(filter accelerator-timeout-error-handling,$(SCENARIO)),13,)))))))))))))
+SCENARIO_ID_allocator := 1
+SCENARIO_ID_heap := 2
+SCENARIO_ID_vm := 3
+SCENARIO_ID_page-fault := 4
+SCENARIO_ID_user-space := 5
+SCENARIO_ID_first-user := 6
+SCENARIO_ID_usercopy := 7
+SCENARIO_ID_scheduler-sync := 8
+SCENARIO_ID_driver-framework := 9
+SCENARIO_ID_accelerator-registers := 10
+SCENARIO_ID_accelerator-descriptors := 11
+SCENARIO_ID_accelerator-irq-completion := 12
+SCENARIO_ID_accelerator-timeout-error-handling := 13
+CONFIG_SCENARIO_ID := $(SCENARIO_ID_$(SCENARIO))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))
@@ -68,7 +82,7 @@ KERNEL_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(KERNEL_SRCS)))
 KERNEL_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(KERNEL_SRCS)))
 DEPS := $(KERNEL_OBJS:.o=.d)
 
-.PHONY: all run debug test test-all test-one boot-test clean toolcheck FORCE
+.PHONY: all run debug test test-all test-stage4 test-one boot-test clean toolcheck FORCE
 
 all: $(KERNEL_ELF) $(KERNEL_BIN)
 
@@ -92,6 +106,12 @@ endif
 test-all:
 	@for scenario in $(SCENARIOS); do \
 		echo "==> smoke test: $$scenario"; \
+		$(MAKE) --no-print-directory test-one SCENARIO=$$scenario || exit $$?; \
+	done
+
+test-stage4:
+	@for scenario in $(STAGE4_SCENARIOS); do \
+		echo "==> stage4 smoke test: $$scenario"; \
 		$(MAKE) --no-print-directory test-one SCENARIO=$$scenario || exit $$?; \
 	done
 

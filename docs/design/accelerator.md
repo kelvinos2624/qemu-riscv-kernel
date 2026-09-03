@@ -266,7 +266,7 @@ the device into an error state that requires reset.
 
 ## Test Evidence
 
-The `accel-registers` scenario verifies:
+The `accelerator-registers` scenario verifies:
 
 - reset clears status to `IDLE` and clears IRQ status
 - start from `IDLE` completes synchronously to `DONE`
@@ -279,7 +279,7 @@ The `accel-registers` scenario verifies:
 The scenario prints:
 
 ```text
-scenario: accel-registers
+scenario: accelerator-registers
 accel: reset idle
 accel: start done
 accel: invalid transition error
