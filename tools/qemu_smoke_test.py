@@ -147,6 +147,21 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "accelerator irq completion scenario",
     },
+    "accelerator-timeout-error-handling": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: accelerator-timeout-error-handling",
+            "accel: zero timeout rejected before start",
+            "accel: stuck request timed out",
+            "accel: reset required after timeout",
+            "accel: late irq after timeout acked",
+            "accel: timed submit completed before timeout",
+            "accel: invalid command error passed",
+            "milestone 21: accelerator timeout/error handling",
+        ],
+        "required_trace_types": [],
+        "success": "accelerator timeout/error handling scenario",
+    },
 }
 TIMEOUT_SECONDS = 15.0
 
@@ -165,6 +180,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 18:")
         or line.startswith("milestone 19:")
         or line.startswith("milestone 20:")
+        or line.startswith("milestone 21:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")

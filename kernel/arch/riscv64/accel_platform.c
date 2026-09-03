@@ -89,6 +89,11 @@ static void accel_start_descriptor(uintptr_t cmd_base)
     }
 
     accel_cmd_t *cmd = (accel_cmd_t *)cmd_base;
+    if (cmd->status == ACCEL_CMD_STATUS_TIMEOUT) {
+        accel_enter_error();
+        return;
+    }
+
     if (!accel_descriptor_payload_is_valid(cmd)) {
         cmd->status = ACCEL_CMD_STATUS_INVALID;
         accel_enter_error();

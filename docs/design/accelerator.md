@@ -8,11 +8,13 @@ model milestone introduced a hardware-like MMIO device with deterministic
 status, control, and interrupt-status behavior. The descriptor milestone adds a
 kernel submission API and one command operation over allocator-managed physical
 memory. The IRQ-completion milestone routes descriptor completion through the
-driver ISR and wait queues.
+driver ISR and wait queues. The timeout/error milestone makes failed waits and
+recovery policy explicit.
 
 This stage still does not implement real external interrupt-controller
-delivery, userspace syscalls, timeout policy, or throughput measurements. Those
-belong to later Stage 4 and Stage 5 work.
+delivery, userspace syscalls, cancellation/reset of an already executing
+hardware command, or throughput measurements. Those belong to later Stage 4 and
+Stage 5 work.
 
 ## Register Layout
 
@@ -175,6 +177,7 @@ Descriptor submission lives in `kernel/drivers/accel_cmd.h`:
 
 ```c
 int accel_submit_sync(accel_cmd_t *cmd);
+int accel_submit_sync_timeout(accel_cmd_t *cmd, uint64_t ticks);
 ```
 
 The current descriptor format is:
@@ -226,7 +229,40 @@ OK        execution completed
 INVALID   descriptor encoding or memory range was invalid
 ERROR     execution began but failed
 REJECTED  safe descriptor, but device lifecycle rejected submission
+TIMEOUT   safe descriptor, but the timed wait expired
 ```
+
+## Timeout And Recovery
+
+`accel_submit_sync_timeout(cmd, ticks)` is the timeout-aware submission API.
+`accel_submit_sync(cmd)` keeps the old indefinite-wait behavior by using the
+same path with an effectively infinite timeout.
+
+A zero-tick timeout is an immediate timeout before submission. The driver
+validates that the descriptor pointer is safe to write, records descriptor
+status `TIMEOUT`, and returns `ACCEL_ERR_TIMEOUT` without writing `CMD_BASE` or
+`START`.
+
+For nonzero timeouts, the driver submits the descriptor and sleeps on the same
+ISR completion predicate used by the indefinite path. If the ISR completion
+wake is observed first, the request succeeds or fails according to device and
+descriptor status. If `wait_queue_sleep_timeout()` reports `WAIT_TIMEOUT`
+first, the driver records descriptor status `TIMEOUT`, returns
+`ACCEL_ERR_TIMEOUT`, releases the software request slot, and marks the device as
+requiring reset before another public lifecycle operation can proceed.
+
+That recovery flag is driver-owned policy. The simulated hardware may still
+have a consumed or unconsumed `START` pending, but the public driver API will
+reject later submits, raw starts, and public IRQ acknowledgements with
+`ACCEL_ERR_BUSY` until `accel_reset()` succeeds. Reset is allowed after timeout
+because it is the explicit recovery action.
+
+Late IRQs after a timeout are treated as spurious by the ISR because no active
+request owns the slot. The ISR acknowledges known IRQ bits and returns. The
+platform simulator preserves a descriptor already marked `TIMEOUT` instead of
+rewriting it as `INVALID` if the late step reaches the stale command pointer.
+That keeps the software-visible timed-wait result stable while still putting
+the device into an error state that requires reset.
 
 ## Test Evidence
 
@@ -298,6 +334,30 @@ accel: irq completion woke submitter
 accel: reset allows descriptor reuse
 accel: spurious irq ack passed
 milestone 20: interrupt-driven accelerator completion
+```
+
+The `accelerator-timeout-error-handling` scenario verifies:
+
+- zero-tick timeout returns before device start
+- a stuck request times out while no simulator worker advances hardware
+- later public lifecycle operations are rejected until reset
+- a late simulated IRQ after timeout is acked without rewriting the timeout
+  descriptor
+- reset clears timeout recovery policy and allows reuse
+- a timed submission can still complete before its timeout
+- the timed API reports invalid command errors before device start
+
+The scenario prints:
+
+```text
+scenario: accelerator-timeout-error-handling
+accel: zero timeout rejected before start
+accel: stuck request timed out
+accel: reset required after timeout
+accel: late irq after timeout acked
+accel: timed submit completed before timeout
+accel: invalid command error passed
+milestone 21: accelerator timeout/error handling
 ```
 
 ## Course Connection

@@ -11,10 +11,10 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync driver-framework accel-registers accelerator-descriptors accelerator-irq-completion
+SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync driver-framework accel-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
-CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter first-user,$(SCENARIO)),6,$(if $(filter usercopy,$(SCENARIO)),7,$(if $(filter scheduler-sync,$(SCENARIO)),8,$(if $(filter driver-framework,$(SCENARIO)),9,$(if $(filter accel-registers,$(SCENARIO)),10,$(if $(filter accelerator-descriptors,$(SCENARIO)),11,$(if $(filter accelerator-irq-completion,$(SCENARIO)),12,))))))))))))
+CONFIG_SCENARIO_ID := $(if $(filter allocator,$(SCENARIO)),1,$(if $(filter heap,$(SCENARIO)),2,$(if $(filter vm,$(SCENARIO)),3,$(if $(filter page-fault,$(SCENARIO)),4,$(if $(filter user-space,$(SCENARIO)),5,$(if $(filter first-user,$(SCENARIO)),6,$(if $(filter usercopy,$(SCENARIO)),7,$(if $(filter scheduler-sync,$(SCENARIO)),8,$(if $(filter driver-framework,$(SCENARIO)),9,$(if $(filter accel-registers,$(SCENARIO)),10,$(if $(filter accelerator-descriptors,$(SCENARIO)),11,$(if $(filter accelerator-irq-completion,$(SCENARIO)),12,$(if $(filter accelerator-timeout-error-handling,$(SCENARIO)),13,)))))))))))))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
 $(error unknown SCENARIO '$(SCENARIO)' expected one of: $(SCENARIOS))

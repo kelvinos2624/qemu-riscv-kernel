@@ -34,6 +34,7 @@
 #define ACCEL_ERR_INVALID (-2)
 #define ACCEL_ERR_BUSY (-3)
 #define ACCEL_ERR_IO (-4)
+#define ACCEL_ERR_TIMEOUT (-5)
 
 extern const driver_t accel_driver;
 

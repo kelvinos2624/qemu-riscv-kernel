@@ -9,9 +9,9 @@ hardware-like devices.
 The first Stage 4 PR provides MMIO helpers, immutable platform resource
 descriptions, a bounded runtime device registry, built-in driver probing, and
 descriptive IRQ metadata. Later Stage 4 work adds the simulated accelerator
-register model and a synchronous descriptor submission API. Stage 4 still does
-not implement external interrupt routing, blocking driver completion, or
-user-facing device syscalls.
+register model, descriptor submission APIs, interrupt-driven completion, and
+timeout-aware recovery policy. Stage 4 still does not implement real external
+interrupt-controller routing or user-facing device syscalls.
 
 ## MMIO Access
 
