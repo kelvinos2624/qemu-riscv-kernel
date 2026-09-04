@@ -41,6 +41,8 @@ static accel_cmd_t *accel_timeout_reuse_cmd;
 static accel_cmd_t *accel_timeout_invalid_cmd;
 static uint8_t *accel_timeout_buffer;
 static user_task_t user_satp_task;
+static user_task_t user_lifecycle_task;
+static size_t user_lifecycle_initial_free;
 static volatile int accel_timeout_submit_started;
 static volatile int accel_timeout_observed;
 static volatile int accel_timeout_late_irq_done;
@@ -55,6 +57,7 @@ static void scenario_page_fault(void) __attribute__((noreturn));
 static void scenario_user_space(void) __attribute__((noreturn));
 static void scenario_first_user(void) __attribute__((noreturn));
 static void scenario_user_satp(void) __attribute__((noreturn));
+static void scenario_user_task(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
@@ -644,6 +647,66 @@ static void scenario_user_satp(void)
     console_write_hex64(frame->sp);
     console_write(" satp=");
     console_write_hex64(user_task_satp(&user_satp_task));
+    console_write("\n");
+
+    thread_start();
+}
+
+static void user_task_lifecycle_observer(void *arg)
+{
+    (void)arg;
+
+    if (user_task_state(&user_lifecycle_task) != USER_TASK_DESTROYED) {
+        PANIC("user task was not destroyed after exit");
+    }
+    if (user_task_exit_code(&user_lifecycle_task) != 0) {
+        PANIC("user task recorded wrong exit code");
+    }
+    if (page_free_count() != user_lifecycle_initial_free) {
+        console_write("user: lifecycle free expected=");
+        console_write_hex64(user_lifecycle_initial_free);
+        console_write(" actual=");
+        console_write_hex64(page_free_count());
+        console_write("\n");
+        PANIC("user task lifecycle leaked pages");
+    }
+    if (thread_create_user("resume-destroyed", &user_lifecycle_task) >= 0) {
+        PANIC("destroyed user task was resumable");
+    }
+
+    console_write("user: task lifecycle cleanup passed\n");
+    console_write("milestone 23: user task lifecycle\n");
+    thread_exit();
+}
+
+static void scenario_user_task(void)
+{
+    console_write("scenario: user-task\n");
+
+    user_lifecycle_initial_free = page_free_count();
+    const size_t user_program_size =
+        (size_t)(first_user_end - first_user_start);
+    if (user_task_init(&user_lifecycle_task, first_user_start, user_program_size) < 0) {
+        PANIC("user lifecycle task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&user_lifecycle_task);
+    if (frame == NULL) {
+        PANIC("user lifecycle missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user("user-task", &user_lifecycle_task) < 0 ||
+        thread_create("user-task-observer", user_task_lifecycle_observer, NULL) < 0) {
+        PANIC("user lifecycle thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&user_lifecycle_task));
     console_write("\n");
 
     thread_start();
@@ -1468,6 +1531,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_USER_SATP) {
         scenario_user_satp();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_USER_TASK) {
+        scenario_user_task();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {

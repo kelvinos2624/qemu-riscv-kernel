@@ -57,14 +57,16 @@ static void memory_zero(void *ptr, size_t size)
 
 static void user_task_reset(user_task_t *task)
 {
+    task->state = USER_TASK_UNUSED;
     task->address_space.root = NULL;
     task->user_satp = 0;
+    task->exit_code = 0;
     task->code_page = NULL;
     task->stack_page = NULL;
     task->trap_context = NULL;
 }
 
-static void user_task_cleanup_partial(user_task_t *task)
+static void user_task_release_resources(user_task_t *task)
 {
     if (task->address_space.root != NULL) {
         (void)vm_unmap_page(&task->address_space, USER_SPACE_CODE_BASE);
@@ -86,6 +88,16 @@ static void user_task_cleanup_partial(user_task_t *task)
         page_free(task->trap_context);
     }
 
+    task->address_space.root = NULL;
+    task->user_satp = 0;
+    task->code_page = NULL;
+    task->stack_page = NULL;
+    task->trap_context = NULL;
+}
+
+static void user_task_cleanup_partial(user_task_t *task)
+{
+    user_task_release_resources(task);
     user_task_reset(task);
 }
 
@@ -150,13 +162,65 @@ int user_task_init(user_task_t *task, const void *program, size_t program_size)
     context->frame.sp = USER_SPACE_STACK_TOP;
     context->frame.mepc = USER_SPACE_CODE_BASE;
     context->frame.mstatus = SSTATUS_SPIE;
+    task->state = USER_TASK_READY;
 
     return 0;
 }
 
+int user_task_set_kernel_sp(user_task_t *task, uintptr_t kernel_sp)
+{
+    if (!user_task_is_ready(task) || kernel_sp == 0) {
+        return -1;
+    }
+
+    task->trap_context->kernel_sp = kernel_sp;
+    return 0;
+}
+
+int user_task_mark_exited(user_task_t *task, uint64_t exit_code)
+{
+    if (!user_task_is_ready(task)) {
+        return -1;
+    }
+
+    task->state = USER_TASK_EXITED;
+    task->exit_code = exit_code;
+    return 0;
+}
+
+int user_task_destroy(user_task_t *task)
+{
+    if (task == NULL || task->state != USER_TASK_EXITED) {
+        return -1;
+    }
+
+    user_task_release_resources(task);
+    task->state = USER_TASK_DESTROYED;
+    return 0;
+}
+
+int user_task_is_ready(const user_task_t *task)
+{
+    return task != NULL &&
+        task->state == USER_TASK_READY &&
+        task->address_space.root != NULL &&
+        task->user_satp != 0 &&
+        task->trap_context != NULL;
+}
+
+user_task_state_t user_task_state(const user_task_t *task)
+{
+    return task == NULL ? USER_TASK_UNUSED : task->state;
+}
+
+uint64_t user_task_exit_code(const user_task_t *task)
+{
+    return task == NULL ? 0 : task->exit_code;
+}
+
 trap_frame_t *user_task_trap_frame(user_task_t *task)
 {
-    if (task == NULL || task->trap_context == NULL) {
+    if (!user_task_is_ready(task)) {
         return NULL;
     }
 
@@ -165,5 +229,5 @@ trap_frame_t *user_task_trap_frame(user_task_t *task)
 
 uint64_t user_task_satp(const user_task_t *task)
 {
-    return task == NULL ? 0 : task->user_satp;
+    return user_task_is_ready(task) ? task->user_satp : 0;
 }

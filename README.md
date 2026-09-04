@@ -169,6 +169,11 @@ Stage 5 userspace runtime work has started:
 - scheduler-visible user thread referencing a task-owned address space
 - user `exit` syscall retirement from a scheduled U-mode thread
 - `user-satp` smoke scenario proving separate user address-space execution
+- explicit user-task lifecycle states
+- scheduler-timed user-task destruction after switching away from the exiting
+  thread
+- `user-task` smoke scenario proving task reclaim and non-resumability after
+  destruction
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -201,9 +206,9 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are syscall ABI growth, user-task lifetime
-cleanup, and a less temporary process/runtime model. The active project
-milestone is Stage 5 userspace runtime work.
+The next memory-related milestones are syscall ABI growth, userspace runtime
+stubs, and userspace-facing accelerator calls. The active project milestone is
+Stage 5 userspace runtime work.
 
 Common boot output:
 
@@ -256,7 +261,7 @@ User-space scenario output:
 
 ```text
 scenario: user-space
-user: code=0x0000000000001000 stack=0x000000003ffff000 top=0x0000000040000000
+user: code=0x0000000000001000 stack=0x000000003ffff000 top=0x000000003fffffff
 milestone 14: user address space skeleton
 ```
 
@@ -276,6 +281,16 @@ scenario: user-satp
 user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
 user: exited code=0x0000000000000000
 milestone 22: user address-space switching
+```
+
+User-task lifecycle scenario output:
+
+```text
+scenario: user-task
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: exited code=0x0000000000000000
+user: task lifecycle cleanup passed
+milestone 23: user task lifecycle
 ```
 
 Usercopy scenario output:
@@ -490,6 +505,7 @@ make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=user-satp
+make test SCENARIO=user-task
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -512,6 +528,7 @@ make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=user-satp
+make test SCENARIO=user-task
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -553,6 +570,8 @@ The current scenarios are:
 - `first-user`: validates `sret` into U-mode and delegated user `ecall` exit
 - `user-satp`: validates a scheduled U-mode thread running under a separate
   user page table through a fixed trampoline and supervisor-only trap context
+- `user-task`: validates task-owned user address-space teardown after user exit
+  and rejects scheduling a destroyed task
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -602,6 +621,7 @@ Stage 5 evidence matrix:
 | PR | Capability | Scenario | Smoke marker | Command |
 | --- | --- | --- | --- | --- |
 | PR1 | User address-space switching through trampoline | `user-satp` | `milestone 22: user address-space switching` | `make test SCENARIO=user-satp` |
+| PR2 | Real user task/process lifetime | `user-task` | `milestone 23: user task lifecycle` | `make test SCENARIO=user-task` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -609,7 +629,9 @@ VM layer maps/unmaps/translates sparse pages while rejecting invalid requests,
 the common boot path reaches S-mode with Sv39 enabled, an unmapped load produces
 a load page-fault diagnostic, user-space mappings reject invalid VA/PA/flag
 combinations and restore page counts after teardown, the kernel enters one
-U-mode task and handles its exit syscall, safe usercopy validates ranges before
+U-mode task and handles its exit syscall, a scheduled U-mode thread runs under a
+separate user page table, exited user-task resources are reclaimed before a
+destroyed task can be scheduled again, safe usercopy validates ranges before
 copying, cross-page usercopy succeeds, recoverable usercopy faults return an
 error, one thread times out while waiting for a mutex, the idle task runs while
 all real threads are blocked, a later thread can still acquire the mutex after

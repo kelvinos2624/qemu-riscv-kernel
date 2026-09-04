@@ -370,10 +370,10 @@ faults should therefore be treated as kernel bugs unless a future driver API
 defines its own explicit recovery contract.
 
 Successful live page-table edits currently issue a coarse `sfence.vma`. That is
-acceptable for the single-hart, single-active-address-space kernel. Stage 4
-should avoid adding a richer TLB policy unless it truly changes mappings for
-device work; Stage 5 user address-space switching is the more natural point to
-revisit per-address or ASID-aware invalidation.
+acceptable for the single-hart kernel while Stage 5 is still using full TLB
+flushes on user/kernel address-space transitions. Per-address or ASID-aware
+invalidation should wait until the kernel has enough concurrent address-space
+activity to make that policy worth the complexity.
 
 The STM32 RTOS connection is strongest around ISR-to-thread handoff: a device
 interrupt should acknowledge hardware state, update small driver-owned

@@ -140,10 +140,15 @@ to the per-thread kernel stack recorded in the trap context, and then enters C.
 M-mode delegates U-mode `ecall` to S-mode. S-mode `ecall` is still reserved for
 the M-mode timer shim.
 
-The first syscall path recognizes only `USER_SYSCALL_EXIT`. The helper records
-the user exit code, rewrites the saved trap frame to return to an S-mode kernel
-continuation, and the continuation prints the first-user milestone. Unknown
-user syscalls panic.
+The first syscall path recognizes only `USER_SYSCALL_EXIT`. The legacy
+`first-user` scenario records the user exit code, rewrites the saved trap frame
+to return to an S-mode kernel continuation, and the continuation prints the
+first-user milestone.
+
+Scheduled user tasks use the Stage 5 trampoline path. Their exit syscall records
+the exit code in `user_task_t`, retires the associated thread, switches to the
+next scheduler-selected context, and then destroys the task-owned address space
+and backing pages. Unknown user syscalls panic.
 
 This is not a full syscall ABI. It is the smallest modern-OS-shaped mechanism
 needed to prove that U-mode can intentionally return control to the kernel.
