@@ -7,6 +7,9 @@
 #define USER_SPACE_UART0_BASE ((uintptr_t)0x10000000)
 #define USER_SPACE_UART0_END (USER_SPACE_UART0_BASE + PAGE_SIZE)
 
+extern char __trampoline_start[];
+extern char __trampoline_end[];
+
 static int ranges_overlap(
     uintptr_t a_start,
     uintptr_t a_end,
@@ -42,7 +45,7 @@ int user_space_va_range_is_valid(uintptr_t va, size_t size)
         return 0;
     }
 
-    if (va < USER_SPACE_BASE || end > USER_SPACE_TOP) {
+    if (va < USER_SPACE_BASE || end - 1u > USER_SPACE_TOP) {
         return 0;
     }
 
@@ -84,4 +87,46 @@ int user_space_map_stack_page(vm_space_t *space, uintptr_t pa)
         pa,
         VM_PTE_V | VM_PTE_R | VM_PTE_W | VM_PTE_U | VM_PTE_A | VM_PTE_D
     );
+}
+
+int user_space_map_trap_support(vm_space_t *space, uintptr_t trap_context_pa)
+{
+    const uintptr_t trampoline_start = (uintptr_t)__trampoline_start;
+    const uintptr_t trampoline_end = (uintptr_t)__trampoline_end;
+
+    if (space == NULL ||
+        space->root == NULL ||
+        trampoline_start == trampoline_end ||
+        trampoline_end - trampoline_start > PAGE_SIZE ||
+        (trampoline_start & PAGE_MASK) != 0 ||
+        !user_pa_range_is_valid(trap_context_pa, PAGE_SIZE)) {
+        return VM_ERR_INVALID;
+    }
+
+    const uint64_t trampoline_flags = VM_PTE_V | VM_PTE_R | VM_PTE_X | VM_PTE_A;
+    const uint64_t context_flags =
+        VM_PTE_V | VM_PTE_R | VM_PTE_W | VM_PTE_A | VM_PTE_D;
+
+    int result = vm_map_page(
+        space,
+        USER_TRAMPOLINE_VA,
+        trampoline_start,
+        trampoline_flags
+    );
+    if (result != VM_OK) {
+        return result;
+    }
+
+    result = vm_map_page(
+        space,
+        USER_TRAP_CONTEXT_VA,
+        trap_context_pa,
+        context_flags
+    );
+    if (result != VM_OK) {
+        (void)vm_unmap_page(space, USER_TRAMPOLINE_VA);
+        return result;
+    }
+
+    return VM_OK;
 }

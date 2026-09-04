@@ -16,6 +16,7 @@
 #include "memory/user_space.h"
 #include "memory/usercopy.h"
 #include "memory/vm.h"
+#include "user/task.h"
 
 #ifndef CONFIG_SCENARIO
 #define CONFIG_SCENARIO SCENARIO_SCHEDULER_SYNC
@@ -39,6 +40,7 @@ static accel_cmd_t *accel_timeout_stuck_cmd;
 static accel_cmd_t *accel_timeout_reuse_cmd;
 static accel_cmd_t *accel_timeout_invalid_cmd;
 static uint8_t *accel_timeout_buffer;
+static user_task_t user_satp_task;
 static volatile int accel_timeout_submit_started;
 static volatile int accel_timeout_observed;
 static volatile int accel_timeout_late_irq_done;
@@ -52,6 +54,7 @@ static void scenario_vm(void) __attribute__((noreturn));
 static void scenario_page_fault(void) __attribute__((noreturn));
 static void scenario_user_space(void) __attribute__((noreturn));
 static void scenario_first_user(void) __attribute__((noreturn));
+static void scenario_user_satp(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
@@ -613,6 +616,37 @@ static void scenario_first_user(void)
     console_write("\n");
 
     trap_restore(frame);
+}
+
+static void scenario_user_satp(void)
+{
+    console_write("scenario: user-satp\n");
+
+    const size_t user_program_size =
+        (size_t)(first_user_end - first_user_start);
+    if (user_task_init(&user_satp_task, first_user_start, user_program_size) < 0) {
+        PANIC("user satp task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&user_satp_task);
+    if (frame == NULL) {
+        PANIC("user satp missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user("user-satp", &user_satp_task) < 0) {
+        PANIC("user satp thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&user_satp_task));
+    console_write("\n");
+
+    thread_start();
 }
 
 static void expect_usercopy_invalid(int result, const char *name)
@@ -1430,6 +1464,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_FIRST_USER) {
         scenario_first_user();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_USER_SATP) {
+        scenario_user_satp();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {

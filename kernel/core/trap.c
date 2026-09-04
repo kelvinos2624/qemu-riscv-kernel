@@ -3,11 +3,15 @@
 #include "core/thread.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
+#include "memory/user_space.h"
+#include "user/task.h"
 #include "user/syscall.h"
 
 #include <stddef.h>
 
 extern void trap_entry(void);
+extern char __trampoline_start[];
+extern void user_trampoline_userret(uint64_t user_satp, uintptr_t trap_context_va);
 
 static volatile uint64_t trap_selftest_seen;
 
@@ -69,6 +73,32 @@ static void trap_report_page_fault(trap_frame_t *frame, uint64_t cause)
     PANIC("page fault");
 }
 
+static void trap_report_user_exit(uint64_t code)
+{
+    console_write("user: exited code=");
+    console_write_hex64(code);
+    console_write("\n");
+}
+
+static void trap_return_to_user(user_task_t *task)
+{
+    trap_frame_t *frame = user_task_trap_frame(task);
+    const uint64_t user_satp = user_task_satp(task);
+    if (frame == NULL ||
+        user_satp == 0 ||
+        (frame->mstatus & SSTATUS_SPP) != 0) {
+        PANIC("invalid user trap return");
+    }
+
+    const uintptr_t userret_offset =
+        (uintptr_t)user_trampoline_userret - (uintptr_t)__trampoline_start;
+    void (*userret)(uint64_t, uintptr_t) =
+        (void (*)(uint64_t, uintptr_t))(USER_TRAMPOLINE_VA + userret_offset);
+
+    userret(user_satp, USER_TRAP_CONTEXT_VA);
+    __builtin_unreachable();
+}
+
 void trap_init(void)
 {
     csr_write_stvec((uint64_t)(uintptr_t)trap_entry);
@@ -89,6 +119,21 @@ void trap_selftest(void)
     }
 
     console_write("trap: self-test passed\n");
+}
+
+void trap_handle_user(trap_frame_t *frame)
+{
+    trap_return_from_handler(trap_handle(frame));
+}
+
+void trap_return_from_handler(trap_frame_t *frame)
+{
+    user_task_t *task = thread_current_user_task_for_frame(frame);
+    if (task != NULL) {
+        trap_return_to_user(task);
+    }
+
+    trap_restore(frame);
 }
 
 trap_frame_t *trap_handle(trap_frame_t *frame)
@@ -112,6 +157,13 @@ trap_frame_t *trap_handle(trap_frame_t *frame)
     }
 
     if (!is_interrupt && cause == MCAUSE_ECALL_U_MODE) {
+        if (frame->a7 == USER_SYSCALL_EXIT &&
+            thread_current_user_task_for_frame(frame) != NULL) {
+            trap_report_user_exit(frame->a0);
+            console_write("milestone 22: user address-space switching\n");
+            return thread_exit_current_from_trap(frame);
+        }
+
         if (user_syscall_handle(frame) == 0) {
             return frame;
         }
