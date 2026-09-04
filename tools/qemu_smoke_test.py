@@ -74,6 +74,19 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "user address-space switching scenario",
     },
+    "user-task": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: user-task",
+            "user: entering u-mode",
+            "user: exited code=",
+            "milestone 22: user address-space switching",
+            "user: task lifecycle cleanup passed",
+            "milestone 23: user task lifecycle",
+        ],
+        "required_trace_types": [],
+        "success": "user task lifecycle scenario",
+    },
     "usercopy": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -193,10 +206,12 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 20:")
         or line.startswith("milestone 21:")
         or line.startswith("milestone 22:")
+        or line.startswith("milestone 23:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
         or line.startswith("user: exited code=")
+        or line.startswith("user: task lifecycle cleanup passed")
         or line.startswith("usercopy:")
         or line.startswith("trace:")
         or line.startswith("thread: null idle")

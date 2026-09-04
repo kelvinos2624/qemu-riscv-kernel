@@ -659,7 +659,7 @@ static void install_thread(
 static void install_user_thread(tid_t tid, const char *name, user_task_t *task)
 {
     trap_frame_t *frame = user_task_trap_frame(task);
-    if (!tid_is_valid(tid) || frame == NULL) {
+    if (!tid_is_valid(tid) || !user_task_is_ready(task) || frame == NULL) {
         PANIC("invalid user thread install");
     }
 
@@ -685,7 +685,9 @@ static void install_user_thread(tid_t tid, const char *name, user_task_t *task)
     threads[tid].entry = NULL;
     threads[tid].arg = NULL;
     threads[tid].name = name;
-    task->trap_context->kernel_sp = stack_top;
+    if (user_task_set_kernel_sp(task, stack_top) < 0) {
+        PANIC("user task kernel stack attach failed");
+    }
     usercopy_probe_clear(tid);
 }
 
@@ -755,7 +757,7 @@ int thread_create(const char *name, void (*entry)(void *arg), void *arg)
 
 int thread_create_user(const char *name, user_task_t *task)
 {
-    if (!threads_initialized || user_task_trap_frame(task) == NULL) {
+    if (!threads_initialized || !user_task_is_ready(task)) {
         return -1;
     }
 
@@ -977,6 +979,7 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
 {
     irq_state_t irq_state = irq_save();
     preempt_disable();
+    user_task_t *exited_user_task = NULL;
 
     thread_t *prev = current_thread;
     if (prev == NULL || prev->state != THREAD_RUNNING) {
@@ -995,6 +998,14 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
     } else {
         if (prev->tid == THREAD_NULL_TID) {
             PANIC("null thread cannot exit");
+        }
+
+        if (prev->user_task != NULL) {
+            if ((frame->mstatus & SSTATUS_SPP) != 0 ||
+                user_task_mark_exited(prev->user_task, frame->a0) < 0) {
+                PANIC("user task exit invariant violation");
+            }
+            exited_user_task = prev->user_task;
         }
 
         prev->trap_frame = NULL;
@@ -1033,6 +1044,10 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
     }
 
     trap_frame_t *next_frame = next->trap_frame;
+
+    if (exited_user_task != NULL && user_task_destroy(exited_user_task) < 0) {
+        PANIC("user task destroy failed");
+    }
 
     preempt_enable();
     irq_restore(irq_state);

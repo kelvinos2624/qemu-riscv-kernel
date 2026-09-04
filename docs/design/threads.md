@@ -293,15 +293,17 @@ Mutex ownership and mutex timeout policy are implemented in `kernel/core/sync.c`
 
 ## Address-Space Placeholder
 
-Each TCB has a nullable `address_space` pointer. The field remains deliberately
-inert: scheduler paths do not switch `satp`, do not change TLB state, and do
-not interpret the field as process ownership.
+Each TCB has a nullable `address_space` pointer and a nullable `user_task`
+pointer. The thread layer still does not own page-table contents; it uses these
+fields to recognize scheduled U-mode threads and to decide when task-owned
+resources can be reclaimed safely.
 
-The placeholder records where a later PR can attach a real user address space.
-PR8 proves U-mode entry with temporary user mappings in the active kernel page
-table, and PR9 validates usercopy against that same active table. Scheduled
-threads still execute as S-mode kernel threads on the shared identity-mapped
-kernel page table unless a scenario explicitly builds and enters a U-mode frame.
+`user_task_t` owns the user page table, code page, stack page, and trap-context
+page. The scheduler owns the timing policy: after a user thread exits and the
+next thread has been selected, the exited task is destroyed so the old trap
+context is no longer part of the return path. `thread_create_user()` only
+accepts tasks in the ready state, so exited or destroyed tasks cannot be
+scheduled again.
 
 ## Interrupt Safety
 
@@ -325,6 +327,7 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Use the per-thread address-space placeholder when general user tasks arrive.
+- Extend user-task scheduling once syscall blocking or multiple user programs
+  need richer process policy.
 - Add priority scheduling as a future scheduling extension if priority-inversion
   experiments become a goal.
