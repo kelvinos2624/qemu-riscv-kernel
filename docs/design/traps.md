@@ -135,23 +135,43 @@ top. The high trampoline swaps `sp` with `sscratch`, saves user registers into
 the supervisor-only trap-context page, switches to the kernel `satp`, switches
 to the per-thread kernel stack recorded in the trap context, and then enters C.
 
-## User Syscall Exit
+## User Syscall ABI
 
 M-mode delegates U-mode `ecall` to S-mode. S-mode `ecall` is still reserved for
 the M-mode timer shim.
 
-The first syscall path recognizes only `USER_SYSCALL_EXIT`. The legacy
-`first-user` scenario records the user exit code, rewrites the saved trap frame
-to return to an S-mode kernel continuation, and the continuation prints the
-first-user milestone.
+The S-mode trap handler owns only hardware trap classification. When it sees a
+U-mode `ecall`, it delegates to the user syscall dispatcher rather than
+interpreting individual syscall numbers itself.
+
+The initial ABI uses `a7` as the syscall number, `a0` as the first argument, and
+`a0` as the return value when the syscall returns to U-mode:
+
+```text
+1: exit(code)
+2: yield() -> 0
+3: sleep(ticks) -> 0
+```
+
+The dispatcher owns syscall policy:
+
+- advance `sepc` for syscalls that return to U-mode
+- report and retire scheduled user-task exits
+- preserve the legacy `first-user` exit continuation
+- route `yield` and `sleep` onto scheduler trap-return mechanisms
+- panic on unknown syscall numbers
 
 Scheduled user tasks use the Stage 5 trampoline path. Their exit syscall records
 the exit code in `user_task_t`, retires the associated thread, switches to the
 next scheduler-selected context, and then destroys the task-owned address space
-and backing pages. Unknown user syscalls panic.
+and backing pages. The legacy `first-user` scenario still rewrites the saved
+trap frame to return to an S-mode kernel continuation because it does not run
+inside the scheduler.
 
-This is not a full syscall ABI. It is the smallest modern-OS-shaped mechanism
-needed to prove that U-mode can intentionally return control to the kernel.
+This is not a full syscall ABI yet. It is the smallest dispatcher-owned
+foundation needed to prove that scheduled U-mode code can intentionally return
+control to the kernel, request scheduler-visible blocking, and receive a simple
+integer result.
 
 ## ECE350 and STM32 RTOS Connection
 
@@ -172,6 +192,7 @@ the broken invariant.
 
 ## Next Work
 
-- Move user execution to a separate user page table with explicit `satp`
-  switching or a trampoline.
-- Grow the syscall ABI beyond first-user exit.
+- Add userspace runtime stubs so user programs can call the ABI without inline
+  assembly in every scenario.
+- Add pointer-bearing syscalls once usercopy policy at the syscall boundary is
+  ready.

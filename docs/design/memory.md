@@ -353,7 +353,8 @@ not prove that the caller currently owns the frame. The accelerator descriptor
 API still requires callers to allocate and retain the pages they submit.
 
 User virtual addresses must never be passed directly to the simulated device.
-Kernel-only driver scenarios can begin with kernel-owned buffers. Later
+Kernel-only driver scenarios can begin with kernel-owned buffers. The initial
+Stage 5 syscall ABI intentionally carries only integer arguments. Later
 userspace-facing driver syscalls should use `copy_from_user()` and
 `copy_to_user()` for descriptor-sized metadata, then validate and pin or copy
 payload buffers before constructing device command descriptors.

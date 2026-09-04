@@ -174,6 +174,9 @@ Stage 5 userspace runtime work has started:
   thread
 - `user-task` smoke scenario proving task reclaim and non-resumability after
   destruction
+- dispatcher-owned user syscall ABI for `exit`, `yield`, and `sleep`
+- `syscall-basic` smoke scenario proving scheduled user syscalls can return,
+  yield, sleep, and exit through one dispatcher
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -206,9 +209,9 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are syscall ABI growth, userspace runtime
-stubs, and userspace-facing accelerator calls. The active project milestone is
-Stage 5 userspace runtime work.
+The next memory-related milestones are userspace runtime stubs,
+userspace-facing accelerator calls, syscall validation, and runtime tracing. The
+active project milestone is Stage 5 userspace runtime work.
 
 Common boot output:
 
@@ -291,6 +294,17 @@ user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
 user: exited code=0x0000000000000000
 user: task lifecycle cleanup passed
 milestone 23: user task lifecycle
+```
+
+Basic syscall ABI scenario output:
+
+```text
+scenario: syscall-basic
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: syscall yield
+user: syscall sleep ticks=0x0000000000000002
+user: exited code=0x0000000000000000
+milestone 24: syscall ABI
 ```
 
 Usercopy scenario output:
@@ -506,6 +520,7 @@ make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=user-satp
 make test SCENARIO=user-task
+make test SCENARIO=syscall-basic
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -529,6 +544,7 @@ make test SCENARIO=user-space
 make test SCENARIO=first-user
 make test SCENARIO=user-satp
 make test SCENARIO=user-task
+make test SCENARIO=syscall-basic
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -572,6 +588,8 @@ The current scenarios are:
   user page table through a fixed trampoline and supervisor-only trap context
 - `user-task`: validates task-owned user address-space teardown after user exit
   and rejects scheduling a destroyed task
+- `syscall-basic`: validates the dispatcher-owned user syscall ABI for `yield`,
+  `sleep`, and `exit`
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -622,6 +640,7 @@ Stage 5 evidence matrix:
 | --- | --- | --- | --- | --- |
 | PR1 | User address-space switching through trampoline | `user-satp` | `milestone 22: user address-space switching` | `make test SCENARIO=user-satp` |
 | PR2 | Real user task/process lifetime | `user-task` | `milestone 23: user task lifecycle` | `make test SCENARIO=user-task` |
+| PR3 | Syscall ABI foundation | `syscall-basic` | `milestone 24: syscall ABI` | `make test SCENARIO=syscall-basic` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -631,17 +650,18 @@ a load page-fault diagnostic, user-space mappings reject invalid VA/PA/flag
 combinations and restore page counts after teardown, the kernel enters one
 U-mode task and handles its exit syscall, a scheduled U-mode thread runs under a
 separate user page table, exited user-task resources are reclaimed before a
-destroyed task can be scheduled again, safe usercopy validates ranges before
-copying, cross-page usercopy succeeds, recoverable usercopy faults return an
-error, one thread times out while waiting for a mutex, the idle task runs while
-all real threads are blocked, a later thread can still acquire the mutex after
-the owner unlocks, the trace dump includes key events such as context switches,
-idle entry, wait timeout, and mutex timeout, and the driver framework binds a
-simulated accelerator device by compatible string before validating MMIO-backed
-driver operations. The accelerator-register scenario proves reset-to-idle,
-synchronous start-to-done, IRQ acknowledgement without state reset, invalid
-start-after-done error handling, and reset priority over start. The
-accelerator-descriptor scenario proves allocator-backed descriptor submission,
+destroyed task can be scheduled again, scheduled user syscalls can yield, sleep,
+return success, and exit through the dispatcher, safe usercopy validates ranges
+before copying, cross-page usercopy succeeds, recoverable usercopy faults return
+an error, one thread times out while waiting for a mutex, the idle task runs
+while all real threads are blocked, a later thread can still acquire the mutex
+after the owner unlocks, the trace dump includes key events such as context
+switches, idle entry, wait timeout, and mutex timeout, and the driver framework
+binds a simulated accelerator device by compatible string before validating
+MMIO-backed driver operations. The accelerator-register scenario proves
+reset-to-idle, synchronous start-to-done, IRQ acknowledgement without state
+reset, invalid start-after-done error handling, and reset priority over start.
+The accelerator-descriptor scenario proves allocator-backed descriptor submission,
 safe page-contained execution, invalid descriptor/range rejection, and
 deterministic lifecycle rejection before reset. The accelerator IRQ-completion
 scenario proves that descriptor completion can block on driver-owned request

@@ -87,6 +87,20 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "user task lifecycle scenario",
     },
+    "syscall-basic": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: syscall-basic",
+            "user: entering u-mode",
+            "user: syscall yield",
+            "user: syscall sleep",
+            "user: exited code=",
+            "milestone 22: user address-space switching",
+            "milestone 24: syscall ABI",
+        ],
+        "required_trace_types": [],
+        "success": "syscall ABI scenario",
+    },
     "usercopy": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -207,10 +221,13 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 21:")
         or line.startswith("milestone 22:")
         or line.startswith("milestone 23:")
+        or line.startswith("milestone 24:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
         or line.startswith("user: exited code=")
+        or line.startswith("user: syscall yield")
+        or line.startswith("user: syscall sleep")
         or line.startswith("user: task lifecycle cleanup passed")
         or line.startswith("usercopy:")
         or line.startswith("trace:")
@@ -297,6 +314,8 @@ def main() -> int:
                                 sequence_line = "user: entering u-mode"
                             elif stripped_line.startswith("user: exited code="):
                                 sequence_line = "user: exited code="
+                            elif stripped_line.startswith("user: syscall sleep"):
+                                sequence_line = "user: syscall sleep"
                             else:
                                 sequence_line = stripped_line
 

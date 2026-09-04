@@ -73,13 +73,6 @@ static void trap_report_page_fault(trap_frame_t *frame, uint64_t cause)
     PANIC("page fault");
 }
 
-static void trap_report_user_exit(uint64_t code)
-{
-    console_write("user: exited code=");
-    console_write_hex64(code);
-    console_write("\n");
-}
-
 static void trap_return_to_user(user_task_t *task)
 {
     trap_frame_t *frame = user_task_trap_frame(task);
@@ -157,22 +150,7 @@ trap_frame_t *trap_handle(trap_frame_t *frame)
     }
 
     if (!is_interrupt && cause == MCAUSE_ECALL_U_MODE) {
-        if (frame->a7 == USER_SYSCALL_EXIT &&
-            thread_current_user_task_for_frame(frame) != NULL) {
-            trap_report_user_exit(frame->a0);
-            console_write("milestone 22: user address-space switching\n");
-            return thread_exit_current_from_trap(frame);
-        }
-
-        if (user_syscall_handle(frame) == 0) {
-            return frame;
-        }
-
-        console_write("\ntrap: unknown user ecall ");
-        trap_print_field("syscall", frame->a7);
-        trap_print_field("sepc", frame->mepc);
-        console_write("\n");
-        PANIC("unknown user syscall");
+        return user_syscall_dispatch(frame);
     }
 
     if (!is_interrupt && trap_is_page_fault(cause)) {
