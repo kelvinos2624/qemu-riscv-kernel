@@ -177,6 +177,10 @@ Stage 5 userspace runtime work has started:
 - dispatcher-owned user syscall ABI for `exit`, `yield`, and `sleep`
 - `syscall-basic` smoke scenario proving scheduled user syscalls can return,
   yield, sleep, and exit through one dispatcher
+- freestanding text-only C userspace build with `_start`, `user_main()`, and
+  named syscall runtime stubs
+- `user-runtime` smoke scenario proving C user code can call runtime stubs and
+  exit through the scheduled task path
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -209,9 +213,9 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are userspace runtime stubs,
-userspace-facing accelerator calls, syscall validation, and runtime tracing. The
-active project milestone is Stage 5 userspace runtime work.
+The next memory-related milestones are userspace-facing accelerator calls,
+syscall validation, and runtime tracing. The active project milestone is Stage 5
+userspace runtime work.
 
 Common boot output:
 
@@ -306,6 +310,19 @@ user: syscall sleep ticks=0x0000000000000002
 user: exited code=0x0000000000000000
 milestone 22: user address-space switching
 milestone 24: syscall ABI
+```
+
+Userspace runtime scenario output:
+
+```text
+scenario: user-runtime
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: syscall yield
+user: syscall sleep ticks=0x0000000000000002
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
+user: runtime stubs passed
+milestone 25: userspace runtime
 ```
 
 Usercopy scenario output:
@@ -522,6 +539,7 @@ make test SCENARIO=first-user
 make test SCENARIO=user-satp
 make test SCENARIO=user-task
 make test SCENARIO=syscall-basic
+make test SCENARIO=user-runtime
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -546,6 +564,7 @@ make test SCENARIO=first-user
 make test SCENARIO=user-satp
 make test SCENARIO=user-task
 make test SCENARIO=syscall-basic
+make test SCENARIO=user-runtime
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -591,6 +610,8 @@ The current scenarios are:
   and rejects scheduling a destroyed task
 - `syscall-basic`: validates the dispatcher-owned user syscall ABI for `yield`,
   `sleep`, and `exit`
+- `user-runtime`: validates the freestanding C userspace runtime entry and
+  named syscall stubs
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -642,6 +663,7 @@ Stage 5 evidence matrix:
 | PR1 | User address-space switching through trampoline | `user-satp` | `milestone 22: user address-space switching` | `make test SCENARIO=user-satp` |
 | PR2 | Real user task/process lifetime | `user-task` | `milestone 23: user task lifecycle` | `make test SCENARIO=user-task` |
 | PR3 | Syscall ABI foundation | `syscall-basic` | `milestone 24: syscall ABI` | `make test SCENARIO=syscall-basic` |
+| PR4 | Userspace runtime and syscall stubs | `user-runtime` | `milestone 25: userspace runtime` | `make test SCENARIO=user-runtime` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -652,7 +674,9 @@ combinations and restore page counts after teardown, the kernel enters one
 U-mode task and handles its exit syscall, a scheduled U-mode thread runs under a
 separate user page table, exited user-task resources are reclaimed before a
 destroyed task can be scheduled again, scheduled user syscalls can yield, sleep,
-return success, and exit through the dispatcher, safe usercopy validates ranges
+return success, and exit through the dispatcher, freestanding text-only C user
+code can enter through `_start`, call named runtime syscall stubs, return from
+`user_main()`, and exit with that return code, safe usercopy validates ranges
 before copying, cross-page usercopy succeeds, recoverable usercopy faults return
 an error, one thread times out while waiting for a mutex, the idle task runs
 while all real threads are blocked, a later thread can still acquire the mutex

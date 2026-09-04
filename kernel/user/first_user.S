@@ -3,6 +3,8 @@
 .globl first_user_end
 .globl syscall_basic_user_start
 .globl syscall_basic_user_end
+.globl user_runtime_start
+.globl user_runtime_end
 
 .balign 4
 first_user_start:
@@ -38,3 +40,8 @@ syscall_basic_user_start:
     j 2b
     .option pop
 syscall_basic_user_end:
+
+.balign 4
+user_runtime_start:
+    .incbin USER_RUNTIME_BIN
+user_runtime_end:

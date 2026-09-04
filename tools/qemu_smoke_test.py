@@ -101,6 +101,21 @@ SCENARIOS = {
         "required_trace_types": [],
         "success": "syscall ABI scenario",
     },
+    "user-runtime": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: user-runtime",
+            "user: entering u-mode",
+            "user: syscall yield",
+            "user: syscall sleep",
+            "user: exited code=",
+            "milestone 22: user address-space switching",
+            "user: runtime stubs passed",
+            "milestone 25: userspace runtime",
+        ],
+        "required_trace_types": [],
+        "success": "userspace runtime scenario",
+    },
     "usercopy": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -222,12 +237,14 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 22:")
         or line.startswith("milestone 23:")
         or line.startswith("milestone 24:")
+        or line.startswith("milestone 25:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
         or line.startswith("user: exited code=")
         or line.startswith("user: syscall yield")
         or line.startswith("user: syscall sleep")
+        or line.startswith("user: runtime stubs passed")
         or line.startswith("user: task lifecycle cleanup passed")
         or line.startswith("usercopy:")
         or line.startswith("trace:")
