@@ -11,7 +11,7 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic user-runtime usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 STAGE4_SCENARIOS := driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
@@ -31,6 +31,7 @@ SCENARIO_ID_accelerator-timeout-error-handling := 13
 SCENARIO_ID_user-satp := 14
 SCENARIO_ID_user-task := 15
 SCENARIO_ID_syscall-basic := 16
+SCENARIO_ID_user-runtime := 17
 CONFIG_SCENARIO_ID := $(SCENARIO_ID_$(SCENARIO))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
@@ -42,6 +43,9 @@ BUILD_DIR := $(BUILD_ROOT)/$(SCENARIO)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 KERNEL_MAP := $(BUILD_DIR)/kernel.map
+USER_RUNTIME_ELF := $(BUILD_DIR)/user/user-runtime.elf
+USER_RUNTIME_BIN := $(BUILD_DIR)/user/user-runtime.bin
+USER_RUNTIME_MAP := $(BUILD_DIR)/user/user-runtime.map
 CONFIG_STAMP := $(BUILD_DIR)/.config.stamp
 
 ARCH_CFLAGS := -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
@@ -49,9 +53,18 @@ COMMON_CFLAGS := -ffreestanding -fno-common -fno-builtin -fno-stack-protector
 COMMON_CFLAGS += -Wall -Wextra -Werror -O2 -g
 COMMON_CFLAGS += -DCONFIG_TRACE=$(CONFIG_TRACE)
 COMMON_CFLAGS += -DCONFIG_SCENARIO=$(CONFIG_SCENARIO_ID)
-CFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Ikernel
-ASFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Ikernel
+CFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Iinclude -Ikernel
+ASFLAGS := $(ARCH_CFLAGS) $(COMMON_CFLAGS) -Iinclude -Ikernel
 LDFLAGS := -T linker.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(KERNEL_MAP)
+USER_CFLAGS := $(ARCH_CFLAGS) -ffreestanding -fno-common -fno-builtin
+USER_CFLAGS += -fno-stack-protector -fno-pic -fno-pie
+USER_CFLAGS += -fno-asynchronous-unwind-tables -fno-unwind-tables
+USER_CFLAGS += -Wall -Wextra -Werror -O2 -Iinclude -Iuser/include
+USER_ASFLAGS := $(ARCH_CFLAGS) -ffreestanding -fno-common -fno-builtin
+USER_ASFLAGS += -fno-stack-protector -Wall -Wextra -Werror -O2
+USER_ASFLAGS += -Iinclude -Iuser/include
+USER_LDFLAGS := -T user/linker.ld -nostdlib
+USER_LDFLAGS += -Wl,--gc-sections,-Map=$(USER_RUNTIME_MAP)
 
 KERNEL_SRCS := \
 	kernel/arch/riscv64/boot.S \
@@ -82,9 +95,16 @@ KERNEL_SRCS := \
 	kernel/user/syscall.c \
 	kernel/user/task.c
 
+USER_RUNTIME_SRCS := \
+	user/start.S \
+	user/runtime.c \
+	user/programs/runtime_main.c
+
 KERNEL_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(KERNEL_SRCS)))
 KERNEL_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(KERNEL_SRCS)))
-DEPS := $(KERNEL_OBJS:.o=.d)
+USER_RUNTIME_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(USER_RUNTIME_SRCS)))
+USER_RUNTIME_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(USER_RUNTIME_SRCS)))
+DEPS := $(KERNEL_OBJS:.o=.d) $(USER_RUNTIME_OBJS:.o=.d)
 
 .PHONY: all run debug test test-all test-stage4 test-one boot-test clean toolcheck FORCE
 
@@ -131,6 +151,14 @@ $(KERNEL_ELF): $(KERNEL_OBJS) linker.ld
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
+$(USER_RUNTIME_BIN): $(USER_RUNTIME_ELF)
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -O binary $< $@
+
+$(USER_RUNTIME_ELF): $(USER_RUNTIME_OBJS) user/linker.ld
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RUNTIME_OBJS)
+
 $(CONFIG_STAMP): FORCE
 	@mkdir -p $(dir $@)
 	@{ \
@@ -142,13 +170,23 @@ $(CONFIG_STAMP): FORCE
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 
+$(BUILD_DIR)/kernel/user/first_user.o: $(USER_RUNTIME_BIN)
+
+$(BUILD_DIR)/user/%.o: user/%.c $(CONFIG_STAMP)
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/user/%.o: user/%.S $(CONFIG_STAMP)
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_ASFLAGS) -MMD -MP -c $< -o $@
+
 $(BUILD_DIR)/%.o: %.c $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.S $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
-	$(CC) $(ASFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(ASFLAGS) -DUSER_RUNTIME_BIN=\"$(abspath $(USER_RUNTIME_BIN))\" -MMD -MP -c $< -o $@
 
 clean:
 	rm -rf $(BUILD_ROOT)

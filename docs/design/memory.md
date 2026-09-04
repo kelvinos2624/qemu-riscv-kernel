@@ -497,6 +497,14 @@ The first-user scenario verifies:
 - U-mode `ecall` traps back to S-mode
 - the exit syscall path returns to a kernel continuation
 
+The user-runtime scenario verifies:
+
+- a freestanding C user image is linked at `USER_SPACE_CODE_BASE`
+- the image is text-only and fits in the existing single user code page
+- `_start` can call `user_main()` on the mapped user stack
+- named runtime stubs can issue `yield`, `sleep`, and `exit` syscalls
+- returning from `user_main()` becomes the task exit code
+
 The usercopy scenario verifies:
 
 - valid `copy_from_user()` across two user pages

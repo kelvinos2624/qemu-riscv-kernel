@@ -173,6 +173,29 @@ foundation needed to prove that scheduled U-mode code can intentionally return
 control to the kernel, request scheduler-visible blocking, and receive a simple
 integer result.
 
+## Userspace Runtime
+
+The first userspace runtime is a freestanding C environment, not a libc or ELF
+process loader. A tiny assembly `_start` enters `user_main()`, then calls
+`user_exit()` with the returned integer.
+
+Runtime syscall stubs own the user-side calling surface:
+
+```c
+void user_exit(uint64_t code);
+uint64_t user_yield(void);
+uint64_t user_sleep(uint64_t ticks);
+```
+
+Those stubs load the agreed ABI registers and execute `ecall`. They do not own
+kernel syscall policy, scheduling policy, or task lifetime; those remain in the
+dispatcher and thread/task layers.
+
+The runtime image is linked as text-only at `USER_SPACE_CODE_BASE` and converted
+to a flat binary before being embedded into the kernel image. The current user
+task loader still copies one program blob into one executable user page, so the
+user linker script rejects `.rodata`, `.data`, and `.bss`.
+
 ## ECE350 and STM32 RTOS Connection
 
 This follows the ECE350 distinction between hardware traps and OS policy:
@@ -192,7 +215,7 @@ the broken invariant.
 
 ## Next Work
 
-- Add userspace runtime stubs so user programs can call the ABI without inline
-  assembly in every scenario.
 - Add pointer-bearing syscalls once usercopy policy at the syscall boundary is
   ready.
+- Add user data/BSS mappings or a real loader when user programs need globals
+  or string literals.
