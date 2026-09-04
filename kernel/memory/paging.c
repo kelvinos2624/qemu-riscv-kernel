@@ -4,6 +4,7 @@
 #include "drivers/timer.h"
 #include "memory/page_alloc.h"
 #include "memory/paging.h"
+#include "memory/user_space.h"
 #include "memory/vm.h"
 
 #define CLINT_MMIO_BASE ((uintptr_t)0x02000000)
@@ -16,8 +17,11 @@ extern char __rodata_end[];
 extern char __data_start[];
 extern char __kernel_end[];
 extern char __ram_end[];
+extern char __trampoline_start[];
+extern char __trampoline_end[];
 
 static vm_space_t kernel_space;
+static uint64_t kernel_satp;
 
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment)
 {
@@ -87,10 +91,28 @@ uint64_t paging_init_kernel(void)
     map_range(UART0_BASE, UART0_BASE + PAGE_SIZE, rw_flags, "uart");
     map_range(CLINT_MMIO_BASE, CLINT_MMIO_BASE + CLINT_MMIO_SIZE, rw_flags, "clint");
 
-    return SATP_MODE_SV39 | ((uint64_t)(uintptr_t)kernel_space.root >> 12);
+    if ((uintptr_t)__trampoline_start == (uintptr_t)__trampoline_end ||
+        (uintptr_t)(__trampoline_end - __trampoline_start) > PAGE_SIZE ||
+        ((uintptr_t)__trampoline_start & PAGE_MASK) != 0 ||
+        vm_map_page(
+            &kernel_space,
+            USER_TRAMPOLINE_VA,
+            (uintptr_t)__trampoline_start,
+            text_flags
+        ) != VM_OK) {
+        PANIC("kernel trampoline map failed");
+    }
+
+    kernel_satp = SATP_MODE_SV39 | ((uint64_t)(uintptr_t)kernel_space.root >> 12);
+    return kernel_satp;
 }
 
 vm_space_t *paging_kernel_space(void)
 {
     return &kernel_space;
+}
+
+uint64_t paging_kernel_satp(void)
+{
+    return kernel_satp;
 }

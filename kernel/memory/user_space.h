@@ -11,7 +11,10 @@
 #define USER_SPACE_CODE_BASE USER_SPACE_BASE
 #define USER_SPACE_STACK_TOP ((uintptr_t)0x0000000040000000ull)
 #define USER_SPACE_STACK_BASE (USER_SPACE_STACK_TOP - PAGE_SIZE)
-#define USER_SPACE_TOP USER_SPACE_STACK_TOP
+#define USER_SPACE_TOP (USER_SPACE_STACK_TOP - 1u)
+#define USER_SPACE_SV39_MAXVA ((uintptr_t)0x0000004000000000ull)
+#define USER_TRAMPOLINE_VA (USER_SPACE_SV39_MAXVA - PAGE_SIZE)
+#define USER_TRAP_CONTEXT_VA (USER_TRAMPOLINE_VA - PAGE_SIZE)
 
 int user_space_va_range_is_valid(uintptr_t va, size_t size);
 int user_space_map_page(
@@ -22,5 +25,6 @@ int user_space_map_page(
 );
 int user_space_map_code_page(vm_space_t *space, uintptr_t pa);
 int user_space_map_stack_page(vm_space_t *space, uintptr_t pa);
+int user_space_map_trap_support(vm_space_t *space, uintptr_t trap_context_pa);
 
 #endif

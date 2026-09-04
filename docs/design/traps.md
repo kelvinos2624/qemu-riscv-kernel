@@ -15,8 +15,14 @@ machine-timer completion as a supervisor timer interrupt. It must not inspect or
 mutate scheduler queues, thread state, wait queues, mutex state, heap metadata,
 page allocator metadata, trace buffers, or address-space policy.
 
-S-mode uses direct `stvec` with `trap_entry`. Normal kernel traps enter the
-S-mode C trap handler, `trap_handle`, and return through `sret`.
+S-mode uses direct `stvec` with `trap_entry` while normal kernel code is
+running. Normal kernel traps enter the S-mode C trap handler, `trap_handle`, and
+return through `sret`.
+
+When returning to a scheduled U-mode task with its own user page table, the
+kernel temporarily points `stvec` at a fixed high virtual trampoline entry. This
+is required because RISC-V does not switch `satp` on trap entry: the first
+instructions after a U-mode trap still execute through the user page table.
 
 Direct mode is intentionally simple: it gives one path to debug before the
 kernel has many interrupt sources. Vectored mode can be introduced later if
@@ -44,9 +50,16 @@ assembly layout.
 
 ## Return Path
 
-After `trap_handle` returns, the S-mode assembly restore path writes `sepc` and
-`sstatus`, restores general-purpose registers from the selected frame, then
-executes `sret`.
+After `trap_handle` returns, the C return dispatcher checks the selected
+thread/frame. Kernel frames still use the S-mode assembly restore path, which
+writes `sepc` and `sstatus`, restores general-purpose registers from the
+selected frame, then executes `sret`.
+
+User frames owned by the current thread's `user_task_t` return through the
+trampoline. C calls the high trampoline alias with the destination user `satp`
+and fixed trap-context virtual address. The trampoline writes `satp`, executes
+`sfence.vma`, restores the user frame, reloads `sscratch` with the trap-context
+VA, and executes `sret`.
 
 Most traps return the same frame they entered with. Timer preemption and
 kernel-thread control traps may return a different thread's saved frame. This
@@ -115,6 +128,12 @@ the frame location. If a frame will return to S-mode, restore clears
 PR8 intentionally uses temporary user mappings in the active kernel page table.
 This proves the privilege transition and U-mode trap return without also
 solving separate user `satp` switching or a trampoline page.
+
+The Stage 5 `user-satp` path uses a separate convention. While running under a
+user page table, `sscratch` holds `USER_TRAP_CONTEXT_VA`, not a kernel stack
+top. The high trampoline swaps `sp` with `sscratch`, saves user registers into
+the supervisor-only trap-context page, switches to the kernel `satp`, switches
+to the per-thread kernel stack recorded in the trap context, and then enters C.
 
 ## User Syscall Exit
 

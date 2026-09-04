@@ -1,9 +1,11 @@
+#include "arch/riscv64/csr.h"
 #include "arch/riscv64/irq.h"
 #include "core/kernel.h"
 #include "core/thread.h"
 #include "core/trace.h"
 #include "core/trap.h"
 #include "drivers/timer.h"
+#include "user/task.h"
 
 #define THREAD_TRAP_YIELD 1u
 #define THREAD_TRAP_EXIT 2u
@@ -649,8 +651,42 @@ static void install_thread(
     threads[tid].arg = arg;
     threads[tid].name = name;
     threads[tid].address_space = NULL;
+    threads[tid].user_task = NULL;
     usercopy_probe_clear(tid);
     prepare_initial_trap_frame(&threads[tid]);
+}
+
+static void install_user_thread(tid_t tid, const char *name, user_task_t *task)
+{
+    trap_frame_t *frame = user_task_trap_frame(task);
+    if (!tid_is_valid(tid) || frame == NULL) {
+        PANIC("invalid user thread install");
+    }
+
+    const uintptr_t stack_top = align_down(
+        (uintptr_t)&thread_stacks[tid][THREAD_STACK_SIZE],
+        16
+    );
+
+    threads[tid].tid = tid;
+    threads[tid].state = THREAD_READY;
+    threads[tid].wait_reason = THREAD_WAIT_NONE;
+    threads[tid].wait_queue = NULL;
+    threads[tid].kernel_sp = stack_top;
+    threads[tid].trap_frame = frame;
+    threads[tid].address_space = &task->address_space;
+    threads[tid].user_task = task;
+    threads[tid].quantum_ticks = 0;
+    threads[tid].in_ready_queue = 0;
+    threads[tid].in_sleep_queue = 0;
+    threads[tid].in_wait_queue = 0;
+    threads[tid].wake_tick = 0;
+    threads[tid].wait_result = WAIT_OK;
+    threads[tid].entry = NULL;
+    threads[tid].arg = NULL;
+    threads[tid].name = name;
+    task->trap_context->kernel_sp = stack_top;
+    usercopy_probe_clear(tid);
 }
 
 void thread_init(void)
@@ -669,6 +705,7 @@ void thread_init(void)
         threads[i].kernel_sp = 0;
         threads[i].trap_frame = NULL;
         threads[i].address_space = NULL;
+        threads[i].user_task = NULL;
         threads[i].quantum_ticks = 0;
         threads[i].in_ready_queue = 0;
         threads[i].in_sleep_queue = 0;
@@ -716,6 +753,28 @@ int thread_create(const char *name, void (*entry)(void *arg), void *arg)
     return -1;
 }
 
+int thread_create_user(const char *name, user_task_t *task)
+{
+    if (!threads_initialized || user_task_trap_frame(task) == NULL) {
+        return -1;
+    }
+
+    irq_state_t irq_state = irq_save();
+
+    for (tid_t tid = 1; tid < THREAD_MAX; tid++) {
+        if (threads[tid].state == THREAD_UNUSED || threads[tid].state == THREAD_EXITED) {
+            install_user_thread(tid, name, task);
+            ready_enqueue(tid);
+            trace_emit(TRACE_THREAD_CREATE, tid, THREAD_INVALID_TID, 0);
+            irq_restore(irq_state);
+            return tid;
+        }
+    }
+
+    irq_restore(irq_state);
+    return -1;
+}
+
 void thread_start(void)
 {
     if (!threads_initialized || threads_started) {
@@ -734,7 +793,7 @@ void thread_start(void)
     console_write("thread: starting scheduler\n");
 
     (void)irq_state;
-    trap_restore(next->trap_frame);
+    trap_return_from_handler(next->trap_frame);
 }
 
 void thread_yield(void)
@@ -948,6 +1007,8 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
         prev->in_wait_queue = 0;
         prev->wake_tick = 0;
         prev->wait_result = WAIT_OK;
+        prev->address_space = NULL;
+        prev->user_task = NULL;
         prev->state = THREAD_EXITED;
         usercopy_probe_clear(prev->tid);
     }
@@ -976,6 +1037,11 @@ static trap_frame_t *switch_to_next_from_trap(trap_frame_t *frame, int requeue_c
     preempt_enable();
     irq_restore(irq_state);
     return next_frame;
+}
+
+trap_frame_t *thread_exit_current_from_trap(trap_frame_t *frame)
+{
+    return switch_to_next_from_trap(frame, 0);
 }
 
 static trap_frame_t *switch_null_to_next_from_trap(trap_frame_t *frame)
@@ -1220,6 +1286,19 @@ trap_frame_t *thread_maybe_preempt_from_trap(trap_frame_t *frame)
     }
 
     return switch_to_next_from_trap(frame, 1);
+}
+
+user_task_t *thread_current_user_task_for_frame(const trap_frame_t *frame)
+{
+    if (frame == NULL ||
+        current_thread == NULL ||
+        current_thread->user_task == NULL ||
+        current_thread->trap_frame != frame ||
+        (frame->mstatus & SSTATUS_SPP) != 0) {
+        return NULL;
+    }
+
+    return current_thread->user_task;
 }
 
 static void thread_trampoline(void)

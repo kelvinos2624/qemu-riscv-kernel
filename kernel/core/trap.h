@@ -46,6 +46,8 @@ typedef struct trap_frame {
 void trap_init(void);
 void trap_selftest(void);
 trap_frame_t *trap_handle(trap_frame_t *frame);
+void trap_handle_user(trap_frame_t *frame) __attribute__((noreturn));
+void trap_return_from_handler(trap_frame_t *frame) __attribute__((noreturn));
 void trap_restore(trap_frame_t *frame) __attribute__((noreturn));
 
 #endif

@@ -11,7 +11,7 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+SCENARIOS := allocator heap vm page-fault user-space first-user user-satp usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 STAGE4_SCENARIOS := driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
@@ -28,6 +28,7 @@ SCENARIO_ID_accelerator-registers := 10
 SCENARIO_ID_accelerator-descriptors := 11
 SCENARIO_ID_accelerator-irq-completion := 12
 SCENARIO_ID_accelerator-timeout-error-handling := 13
+SCENARIO_ID_user-satp := 14
 CONFIG_SCENARIO_ID := $(SCENARIO_ID_$(SCENARIO))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
@@ -76,7 +77,8 @@ KERNEL_SRCS := \
 	kernel/drivers/device.c \
 	kernel/drivers/uart.c \
 	kernel/user/first_user.S \
-	kernel/user/syscall.c
+	kernel/user/syscall.c \
+	kernel/user/task.c
 
 KERNEL_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(KERNEL_SRCS)))
 KERNEL_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(KERNEL_SRCS)))

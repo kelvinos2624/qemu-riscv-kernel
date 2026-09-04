@@ -7,5 +7,6 @@
 
 uint64_t paging_init_kernel(void);
 vm_space_t *paging_kernel_space(void);
+uint64_t paging_kernel_satp(void);
 
 #endif

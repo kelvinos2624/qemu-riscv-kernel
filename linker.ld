@@ -17,6 +17,11 @@ SECTIONS
     .text : ALIGN(4K) {
         PROVIDE(__text_start = .);
         KEEP(*(.text.boot))
+        . = ALIGN(4K);
+        PROVIDE(__trampoline_start = .);
+        KEEP(*(.text.trampoline))
+        . = ALIGN(4K);
+        PROVIDE(__trampoline_end = .);
         *(.text .text.*)
         PROVIDE(__text_end = .);
     }

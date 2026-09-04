@@ -24,8 +24,10 @@ now includes non-recursive kernel mutexes with FIFO owner transfer,
 timeout-aware blocking, structured scheduler tracing, a bitmap physical page
 allocator, a page-backed size-class kernel heap, Sv39 page-table primitives,
 hardware kernel paging, diagnostic S-mode page-fault handling, a minimal
-U-mode task, delegated user `ecall` exit, and safe usercopy with narrowly
-recoverable page-fault probes. Stage 4 is complete with typed MMIO helpers,
+U-mode task, delegated user `ecall` exit, safe usercopy with narrowly
+recoverable page-fault probes, and a scheduled U-mode thread running under a
+separate user `satp` through a fixed trampoline. Stage 4 is complete with typed
+MMIO helpers,
 immutable platform device resources, a bounded runtime device registry,
 boot-time built-in driver probing, a simulated accelerator register model,
 allocator-backed accelerator command descriptors for kernel-submitted `MEMSET`
@@ -158,6 +160,16 @@ Stage 3 virtual memory and allocation foundations are complete:
 - `SSTATUS_SUM` enabled only inside the interrupt-masked copy window
 - cross-page usercopy scenario coverage
 
+Stage 5 userspace runtime work has started:
+
+- fixed high Sv39 trampoline and trap-context virtual addresses
+- supervisor-only trampoline mapping in both kernel and user page tables
+- per-user-task supervisor-only trap-context page
+- explicit `satp` switch and `sfence.vma` on user trap entry and return
+- scheduler-visible user thread referencing a task-owned address space
+- user `exit` syscall retirement from a scheduled U-mode thread
+- `user-satp` smoke scenario proving separate user address-space execution
+
 Stage 4 driver framework and simulated accelerator work is complete:
 
 - typed volatile MMIO helpers for 8/16/32/64-bit register access
@@ -189,9 +201,9 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are separate user address-space switching,
-syscall ABI growth, and a less temporary process/runtime model. The next
-project milestone is Stage 5 userspace runtime work.
+The next memory-related milestones are syscall ABI growth, user-task lifetime
+cleanup, and a less temporary process/runtime model. The active project
+milestone is Stage 5 userspace runtime work.
 
 Common boot output:
 
@@ -255,6 +267,15 @@ scenario: first-user
 user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000
 user: exited code=0x0000000000000000
 milestone 15: first user task
+```
+
+User-satp scenario output:
+
+```text
+scenario: user-satp
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
 ```
 
 Usercopy scenario output:
@@ -468,6 +489,7 @@ make test SCENARIO=vm
 make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
+make test SCENARIO=user-satp
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -489,6 +511,7 @@ make test SCENARIO=vm
 make test SCENARIO=page-fault
 make test SCENARIO=user-space
 make test SCENARIO=first-user
+make test SCENARIO=user-satp
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -528,6 +551,8 @@ The current scenarios are:
 - `user-space`: validates user mapping policy, sparse layout constants, and
   address-space teardown rules
 - `first-user`: validates `sret` into U-mode and delegated user `ecall` exit
+- `user-satp`: validates a scheduled U-mode thread running under a separate
+  user page table through a fixed trampoline and supervisor-only trap context
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -571,6 +596,12 @@ Stage 4 evidence matrix:
 | PR4 | Interrupt-driven completion path | `accelerator-irq-completion` | `milestone 20: interrupt-driven accelerator completion` | `make test SCENARIO=accelerator-irq-completion` |
 | PR5 | Timeout and error handling | `accelerator-timeout-error-handling` | `milestone 21: accelerator timeout/error handling` | `make test SCENARIO=accelerator-timeout-error-handling` |
 | PR6 | Stage 4 integration cleanup | all Stage 4 scenarios | milestones 17-21 | `make test-stage4` |
+
+Stage 5 evidence matrix:
+
+| PR | Capability | Scenario | Smoke marker | Command |
+| --- | --- | --- | --- | --- |
+| PR1 | User address-space switching through trampoline | `user-satp` | `milestone 22: user address-space switching` | `make test SCENARIO=user-satp` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the

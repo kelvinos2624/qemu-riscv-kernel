@@ -13,6 +13,7 @@
 
 typedef uint16_t tid_t;
 struct trap_frame;
+struct user_task;
 struct vm_space;
 
 typedef struct wait_queue {
@@ -46,6 +47,7 @@ typedef struct thread {
     uintptr_t kernel_sp;
     struct trap_frame *trap_frame;
     struct vm_space *address_space;
+    struct user_task *user_task;
     uint16_t quantum_ticks;
     uint8_t in_ready_queue;
     uint8_t in_sleep_queue;
@@ -59,6 +61,7 @@ typedef struct thread {
 
 void thread_init(void);
 int thread_create(const char *name, void (*entry)(void *arg), void *arg);
+int thread_create_user(const char *name, struct user_task *task);
 void thread_start(void) __attribute__((noreturn));
 void thread_yield(void);
 void thread_sleep(uint64_t ticks);
@@ -83,5 +86,7 @@ int thread_usercopy_probe_recover(struct trap_frame *frame, uint64_t cause);
 void thread_on_timer_tick(void);
 struct trap_frame *thread_handle_control_trap_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);
+struct trap_frame *thread_exit_current_from_trap(struct trap_frame *frame);
+struct user_task *thread_current_user_task_for_frame(const struct trap_frame *frame);
 
 #endif
