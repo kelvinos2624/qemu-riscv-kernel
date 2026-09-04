@@ -16,6 +16,7 @@
 #define SCENARIO_ACCELERATOR_TIMEOUT_ERROR_HANDLING 13
 #define SCENARIO_USER_SATP 14
 #define SCENARIO_USER_TASK 15
+#define SCENARIO_SYSCALL_BASIC 16
 
 void scenario_run(void) __attribute__((noreturn));
 

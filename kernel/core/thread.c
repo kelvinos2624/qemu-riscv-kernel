@@ -55,6 +55,8 @@ static void thread_trampoline(void) __attribute__((noreturn));
 static void preempt_disable(void);
 static void preempt_enable(void);
 static void usercopy_probe_clear(tid_t tid);
+static trap_frame_t *switch_null_to_next_from_trap(trap_frame_t *frame);
+static trap_frame_t *sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks);
 
 static int tid_is_valid(tid_t tid)
 {
@@ -1059,6 +1061,24 @@ trap_frame_t *thread_exit_current_from_trap(trap_frame_t *frame)
     return switch_to_next_from_trap(frame, 0);
 }
 
+trap_frame_t *thread_yield_current_from_trap(trap_frame_t *frame)
+{
+    if (!threads_started || current_thread == NULL) {
+        return frame;
+    }
+
+    if (ready_empty()) {
+        current_thread->quantum_ticks = 0;
+        return frame;
+    }
+
+    if (current_thread->tid == THREAD_NULL_TID) {
+        return switch_null_to_next_from_trap(frame);
+    }
+
+    return switch_to_next_from_trap(frame, 1);
+}
+
 static trap_frame_t *switch_null_to_next_from_trap(trap_frame_t *frame)
 {
     irq_state_t irq_state = irq_save();
@@ -1135,6 +1155,27 @@ static trap_frame_t *sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks
     return next_frame;
 }
 
+trap_frame_t *thread_sleep_current_from_trap(trap_frame_t *frame, uint64_t ticks)
+{
+    if (!threads_started) {
+        return frame;
+    }
+
+    if (current_thread == NULL) {
+        return frame;
+    }
+
+    if (current_thread->tid == THREAD_NULL_TID) {
+        PANIC("null thread cannot sleep");
+    }
+
+    if (ticks == 0) {
+        return thread_yield_current_from_trap(frame);
+    }
+
+    return sleep_current_from_trap(frame, ticks);
+}
+
 static trap_frame_t *block_current_from_trap(
     trap_frame_t *frame,
     wait_queue_t *queue,
@@ -1197,20 +1238,7 @@ trap_frame_t *thread_handle_control_trap_from_trap(trap_frame_t *frame)
     }
 
     if (op == THREAD_TRAP_YIELD) {
-        if (current_thread == NULL) {
-            return frame;
-        }
-
-        if (ready_empty()) {
-            current_thread->quantum_ticks = 0;
-            return frame;
-        }
-
-        if (current_thread->tid == THREAD_NULL_TID) {
-            return switch_null_to_next_from_trap(frame);
-        }
-
-        return switch_to_next_from_trap(frame, 1);
+        return thread_yield_current_from_trap(frame);
     }
 
     if (op == THREAD_TRAP_EXIT) {
@@ -1218,24 +1246,7 @@ trap_frame_t *thread_handle_control_trap_from_trap(trap_frame_t *frame)
     }
 
     if (op == THREAD_TRAP_SLEEP) {
-        if (current_thread == NULL) {
-            return frame;
-        }
-
-        if (current_thread->tid == THREAD_NULL_TID) {
-            PANIC("null thread cannot sleep");
-        }
-
-        if (arg0 == 0) {
-            if (ready_empty()) {
-                current_thread->quantum_ticks = 0;
-                return frame;
-            }
-
-            return switch_to_next_from_trap(frame, 1);
-        }
-
-        return sleep_current_from_trap(frame, arg0);
+        return thread_sleep_current_from_trap(frame, arg0);
     }
 
     if (op == THREAD_TRAP_WAIT) {

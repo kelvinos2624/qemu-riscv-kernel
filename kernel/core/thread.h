@@ -87,6 +87,8 @@ void thread_on_timer_tick(void);
 struct trap_frame *thread_handle_control_trap_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_exit_current_from_trap(struct trap_frame *frame);
+struct trap_frame *thread_yield_current_from_trap(struct trap_frame *frame);
+struct trap_frame *thread_sleep_current_from_trap(struct trap_frame *frame, uint64_t ticks);
 struct user_task *thread_current_user_task_for_frame(const struct trap_frame *frame);
 
 #endif

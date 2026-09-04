@@ -305,6 +305,12 @@ context is no longer part of the return path. `thread_create_user()` only
 accepts tasks in the ready state, so exited or destroyed tasks cannot be
 scheduled again.
 
+User syscalls reuse the scheduler's trap-return mechanisms for `yield` and
+`sleep`. The syscall dispatcher owns ABI policy such as syscall numbers,
+argument registers, return values, and unknown-syscall behavior; the thread
+layer only provides the mechanism for selecting another context or blocking the
+current thread until a tick deadline.
+
 ## Interrupt Safety
 
 Scheduler state mutations are protected with `irq_save()` and `irq_restore()`.
@@ -327,7 +333,7 @@ kernel would need spinlocks in addition to interrupt masking.
 
 ## Next Work
 
-- Extend user-task scheduling once syscall blocking or multiple user programs
-  need richer process policy.
+- Extend user-task scheduling once multiple user programs need richer process
+  policy.
 - Add priority scheduling as a future scheduling extension if priority-inversion
   experiments become a goal.

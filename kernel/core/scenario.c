@@ -42,6 +42,7 @@ static accel_cmd_t *accel_timeout_invalid_cmd;
 static uint8_t *accel_timeout_buffer;
 static user_task_t user_satp_task;
 static user_task_t user_lifecycle_task;
+static user_task_t syscall_basic_task;
 static size_t user_lifecycle_initial_free;
 static volatile int accel_timeout_submit_started;
 static volatile int accel_timeout_observed;
@@ -58,6 +59,7 @@ static void scenario_user_space(void) __attribute__((noreturn));
 static void scenario_first_user(void) __attribute__((noreturn));
 static void scenario_user_satp(void) __attribute__((noreturn));
 static void scenario_user_task(void) __attribute__((noreturn));
+static void scenario_syscall_basic(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
@@ -68,6 +70,8 @@ static void scenario_accelerator_timeout_error_handling(void) __attribute__((nor
 
 extern char first_user_start[];
 extern char first_user_end[];
+extern char syscall_basic_user_start[];
+extern char syscall_basic_user_end[];
 
 static int page_is_aligned(const void *page)
 {
@@ -712,6 +716,58 @@ static void scenario_user_task(void)
     console_write_hex64(frame->sp);
     console_write(" satp=");
     console_write_hex64(user_task_satp(&user_lifecycle_task));
+    console_write("\n");
+
+    thread_start();
+}
+
+static void syscall_basic_observer_thread(void *arg)
+{
+    (void)arg;
+
+    while (user_task_state(&syscall_basic_task) != USER_TASK_DESTROYED) {
+        thread_yield();
+    }
+
+    if (user_task_exit_code(&syscall_basic_task) != 0) {
+        PANIC("syscall basic recorded wrong exit code");
+    }
+
+    console_write("milestone 24: syscall ABI\n");
+    thread_exit();
+}
+
+static void scenario_syscall_basic(void)
+{
+    console_write("scenario: syscall-basic\n");
+
+    const size_t user_program_size =
+        (size_t)(syscall_basic_user_end - syscall_basic_user_start);
+    if (user_task_init(
+            &syscall_basic_task,
+            syscall_basic_user_start,
+            user_program_size
+        ) < 0) {
+        PANIC("syscall basic task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&syscall_basic_task);
+    if (frame == NULL) {
+        PANIC("syscall basic missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user("syscall-basic", &syscall_basic_task) < 0 ||
+        thread_create("syscall-basic-observer", syscall_basic_observer_thread, NULL) < 0) {
+        PANIC("syscall basic thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&syscall_basic_task));
     console_write("\n");
 
     thread_start();
@@ -1540,6 +1596,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_USER_TASK) {
         scenario_user_task();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_SYSCALL_BASIC) {
+        scenario_syscall_basic();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {
