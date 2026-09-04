@@ -304,6 +304,7 @@ user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
 user: syscall yield
 user: syscall sleep ticks=0x0000000000000002
 user: exited code=0x0000000000000000
+milestone 22: user address-space switching
 milestone 24: syscall ABI
 ```
 

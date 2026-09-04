@@ -107,6 +107,7 @@ scenario: syscall-basic
 user: syscall yield
 user: syscall sleep ticks=...
 user: exited code=...
+milestone 22: user address-space switching
 milestone 24: syscall ABI
 ```
 
