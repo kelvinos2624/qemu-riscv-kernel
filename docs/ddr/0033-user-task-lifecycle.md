@@ -37,6 +37,7 @@ USER_TASK_DESTROYED
 `user/task.c` owns the lifecycle mechanism:
 
 - initialize a task into `USER_TASK_READY`
+- reject initialization unless the task object is unused or cleanly destroyed
 - record the per-thread kernel stack pointer used by the trampoline
 - mark a ready task exited with an exit code
 - destroy only an exited task
@@ -57,6 +58,11 @@ longer the current schedulable context.
 `thread_create_user()` now accepts only ready user tasks. This means an exited or
 destroyed task cannot be resumed accidentally by reusing an old `user_task_t`
 pointer.
+
+`user_task_init()` does not implicitly clean up existing resources. Reusing an
+already-ready or exited task object is rejected because overwriting its pointers
+would leak the previous page table, backing pages, and trap context. Callers
+must destroy an exited task before initializing that object again.
 
 The design is deliberately smaller than a full process model. There is still no
 parent/child relationship, wait status, reference counting, address-space
@@ -81,6 +87,7 @@ observer runs afterward and verifies:
 
 - the user task reached `USER_TASK_DESTROYED`
 - the task exit code was recorded
+- initializing an already-ready task is rejected without changing free pages
 - the free-page count returned to the baseline captured before task creation
 - `thread_create_user()` rejects the destroyed task
 

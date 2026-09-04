@@ -689,6 +689,11 @@ static void scenario_user_task(void)
     if (user_task_init(&user_lifecycle_task, first_user_start, user_program_size) < 0) {
         PANIC("user lifecycle task init failed");
     }
+    const size_t free_after_init = page_free_count();
+    if (user_task_init(&user_lifecycle_task, first_user_start, user_program_size) >= 0 ||
+        page_free_count() != free_after_init) {
+        PANIC("ready user task reinit was accepted");
+    }
 
     trap_frame_t *frame = user_task_trap_frame(&user_lifecycle_task);
     if (frame == NULL) {

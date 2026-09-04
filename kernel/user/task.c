@@ -101,12 +101,31 @@ static void user_task_cleanup_partial(user_task_t *task)
     user_task_reset(task);
 }
 
+static int user_task_can_init(const user_task_t *task)
+{
+    if (task == NULL) {
+        return 0;
+    }
+
+    if (task->state == USER_TASK_UNUSED) {
+        return 1;
+    }
+
+    return task->state == USER_TASK_DESTROYED &&
+        task->address_space.root == NULL &&
+        task->user_satp == 0 &&
+        task->code_page == NULL &&
+        task->stack_page == NULL &&
+        task->trap_context == NULL;
+}
+
 int user_task_init(user_task_t *task, const void *program, size_t program_size)
 {
     if (task == NULL ||
         program == NULL ||
         program_size == 0 ||
-        program_size > PAGE_SIZE) {
+        program_size > PAGE_SIZE ||
+        !user_task_can_init(task)) {
         return -1;
     }
 
