@@ -391,6 +391,8 @@ userspace-facing accelerator syscall preserves isolation with a kernel-owned
 bounce buffer: syscall code validates the user destination through the
 scheduled task's page table, submits accelerator work against a page-allocated
 kernel buffer, and copies the completed bytes back with `copy_to_user_task()`.
+If the request times out after device submission, syscall code resets the
+accelerator before returning the descriptor and bounce page to the allocator.
 Future descriptor-shaped APIs still need an explicit pin/copy policy before a
 device can touch caller-provided payload memory.
 
@@ -566,6 +568,7 @@ mapping the user page into the device command:
 
 ```text
 scenario: user-accelerator
+user: accel memset timeout
 user: accel memset
 user: accelerator memset passed
 milestone 26: user accelerator API

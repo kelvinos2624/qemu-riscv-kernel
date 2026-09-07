@@ -121,6 +121,7 @@ SCENARIOS = {
             "milestone 13: kernel paging",
             "scenario: user-accelerator",
             "user: entering u-mode",
+            "user: accel memset timeout",
             "user: accel memset",
             "user: exited code=",
             "milestone 22: user address-space switching",
@@ -260,6 +261,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("user: syscall yield")
         or line.startswith("user: syscall sleep")
         or line.startswith("user: runtime stubs passed")
+        or line.startswith("user: accel memset timeout")
         or line.startswith("user: accel memset")
         or line.startswith("user: accelerator memset passed")
         or line.startswith("user: task lifecycle cleanup passed")

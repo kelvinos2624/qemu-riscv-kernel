@@ -51,6 +51,10 @@ page-backed kernel bounce buffer, submits accelerator `MEMSET` against that
 kernel buffer, and copies the completed bytes back to the task with
 `copy_to_user_task()`.
 
+If a nonzero-timeout submission returns `USER_ACCEL_ERR_TIMEOUT`, the syscall
+resets the accelerator before freeing the temporary descriptor and bounce page.
+The reset proves that the simulated device has forgotten the command base.
+
 The first transfer limit is `0 < len <= PAGE_SIZE`. The user range may cross
 user pages because task-aware usercopy walks the task page table page by page.
 The device-facing bounce buffer remains page-contained to satisfy the existing
@@ -75,6 +79,11 @@ Blocking inside this syscall exposed a trap-return invariant: a user syscall may
 sleep on a kernel continuation frame, but when it resumes and returns the
 original user trap frame, the trap return path must still use the task-owned
 user-satp trampoline.
+
+Timeout also exposes a memory-ownership invariant: a descriptor page and bounce
+page cannot return to the allocator while the device can still observe `CMD_BASE`
+or `dst_pa`. The syscall owns those temporary pages, so it also owns the reset
+needed to quiesce the device before freeing them after timeout.
 
 Userspace now has an accelerator-specific public header. That keeps the generic
 syscall-number header small, but it means status codes and limits are part of a
@@ -109,6 +118,7 @@ Expected smoke output includes:
 ```text
 scenario: user-accelerator
 user: entering u-mode pc=... sp=... satp=...
+user: accel memset timeout
 user: accel memset
 user: exited code=...
 milestone 22: user address-space switching

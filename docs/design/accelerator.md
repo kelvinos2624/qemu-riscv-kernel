@@ -401,6 +401,12 @@ The syscall forwards `timeout_ticks` to `accel_submit_sync_timeout()`. Driver
 status values are returned directly when they match the user-visible ABI. A
 syscall-local allocation failure returns `USER_ACCEL_ERR_NO_MEMORY`.
 
+When a nonzero-timeout request returns `USER_ACCEL_ERR_TIMEOUT`, the syscall
+resets the accelerator before freeing its temporary descriptor and bounce page.
+That reset is part of the syscall's ownership policy: after timeout, the driver
+has released its software request slot, but the simulated device may still hold
+the command base register until reset clears it.
+
 The simulator does not advance independently from a real device thread. The
 `user-accelerator` scenario therefore runs an observer thread that steps the
 simulated accelerator and dispatches pending IRQs while the user task is alive.
@@ -411,6 +417,7 @@ The `user-accelerator` scenario verifies:
 
 - C userspace can call the named accelerator runtime stub
 - the syscall validates the user destination through the scheduled task
+- a timed-out request resets the device before freeing syscall-owned pages
 - the accelerator writes a kernel bounce buffer, not the user page
 - successful completion is copied back to the user buffer
 - a blocking user syscall still returns through the user-satp trampoline
@@ -420,6 +427,7 @@ The scenario prints:
 ```text
 scenario: user-accelerator
 user: entering u-mode pc=... sp=... satp=...
+user: accel memset timeout
 user: accel memset
 user: exited code=...
 milestone 22: user address-space switching

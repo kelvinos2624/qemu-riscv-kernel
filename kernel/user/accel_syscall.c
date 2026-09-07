@@ -33,6 +33,13 @@ static int user_accel_copyback_result(int result)
     return result;
 }
 
+static void user_accel_reset_after_timeout(void)
+{
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("accelerator timeout reset failed");
+    }
+}
+
 static int user_accel_memset_impl(
     user_task_t *task,
     uintptr_t user_dst,
@@ -72,6 +79,10 @@ static int user_accel_memset_impl(
     result = user_accel_copyback_result(
         accel_submit_sync_timeout(cmd, timeout_ticks)
     );
+    if (result == USER_ACCEL_ERR_TIMEOUT && timeout_ticks != 0) {
+        user_accel_reset_after_timeout();
+    }
+
     if (result == USER_ACCEL_OK) {
         if (copy_to_user_task(task, (void *)user_dst, bounce_page, len) !=
             USERCOPY_OK) {
@@ -105,6 +116,10 @@ trap_frame_t *user_accel_syscall_memset(trap_frame_t *frame)
 
     frame->mepc += 4;
     frame->a0 = (uint64_t)(int64_t)result;
-    console_write("user: accel memset\n");
+    if (result == USER_ACCEL_ERR_TIMEOUT) {
+        console_write("user: accel memset timeout\n");
+    } else {
+        console_write("user: accel memset\n");
+    }
     return frame;
 }

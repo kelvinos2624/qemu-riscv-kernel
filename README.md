@@ -334,6 +334,7 @@ User accelerator scenario output:
 ```text
 scenario: user-accelerator
 user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: accel memset timeout
 user: accel memset
 user: exited code=0x0000000000000000
 milestone 22: user address-space switching
@@ -632,7 +633,7 @@ The current scenarios are:
 - `user-runtime`: validates the freestanding C userspace runtime entry and
   named syscall stubs
 - `user-accelerator`: validates a C userspace accelerator `memset` runtime API
-  backed by task-aware usercopy and a kernel bounce buffer
+  backed by task-aware usercopy, timeout cleanup, and a kernel bounce buffer
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -700,7 +701,8 @@ return success, and exit through the dispatcher, freestanding text-only C user
 code can enter through `_start`, call named runtime syscall stubs, return from
 `user_main()`, and exit with that return code, C userspace can request
 accelerator-backed `memset` work through a scalar syscall while the kernel uses
-task-aware usercopy and a bounce buffer for copyback, safe usercopy validates
+task-aware usercopy, timeout reset cleanup, and a bounce buffer for copyback,
+safe usercopy validates
 ranges before copying, cross-page usercopy succeeds, recoverable usercopy faults
 return an error, one thread times out while waiting for a mutex, the idle task
 runs while all real threads are blocked, a later thread can still acquire the

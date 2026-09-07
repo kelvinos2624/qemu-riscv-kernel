@@ -10,6 +10,7 @@
 #include "drivers/accel_cmd.h"
 #include "drivers/device.h"
 #include "drivers/platform.h"
+#include "drivers/timer.h"
 #include "memory/heap.h"
 #include "memory/page_alloc.h"
 #include "memory/paging.h"
@@ -835,6 +836,11 @@ static void scenario_user_runtime(void)
 static void user_accelerator_observer_thread(void *arg)
 {
     (void)arg;
+
+    const uint64_t start_ticks = timer_ticks();
+    while (timer_ticks() - start_ticks < 3u) {
+        thread_yield();
+    }
 
     while (user_task_state(&user_accelerator_task) != USER_TASK_DESTROYED) {
         platform_accel_step();
