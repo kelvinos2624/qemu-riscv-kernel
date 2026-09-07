@@ -20,6 +20,10 @@ M-mode emergency stack before saving registers. Machine timer interrupts can
 arrive while S-mode is returning to U-mode or otherwise has a non-kernel `sp`,
 so M-mode must not trust the interrupted stack pointer.
 
+M-mode also enables S-mode reads of the cycle and time counters through
+`mcounteren`. The trace layer uses `cycle` for measurement evidence, while
+normal timer policy still uses the S-mode timer path.
+
 S-mode uses direct `stvec` with `trap_entry` while normal kernel code is
 running. Normal kernel traps enter the S-mode C trap handler, `trap_handle`, and
 return through `sret`.

@@ -12,7 +12,7 @@ explain deeply, but real enough to exercise the hardware/software boundary.
 
 ## Project Status
 
-Progress: `[###################-] 96%`
+Progress: `[####################] 98%`
 
 The kernel currently boots on QEMU `virt` with `-bios none`, builds an
 identity-mapped Sv39 kernel page table, enters S-mode, initializes UART output,
@@ -62,8 +62,8 @@ The project is designed to show practical understanding of:
 
 Machine mode is used as a minimal bootstrap and platform shim. Normal kernel
 execution runs in supervisor mode under an identity-mapped Sv39 page table and
-can enter a minimal U-mode task. Separate user `satp` switching remains a later
-milestone.
+can run scheduled U-mode tasks under separate user page tables through the
+Stage 5 trampoline.
 
 ## Current Status
 
@@ -189,6 +189,11 @@ Stage 5 userspace runtime work has started:
 - `syscall-negative` smoke scenario proving unsupported syscalls and invalid
   accelerator pointers, lengths, permissions, wraparound, and timeout recovery
   stay contained
+- runtime trace events for user syscalls, user accelerator validation/copyback,
+  and accelerator driver submit/complete/timeout/reset
+- cycle-stamped trace records with two event-specific metadata arguments
+- `runtime-tracing` smoke scenario proving Stage 5 runtime/device events appear
+  in one structured trace dump
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -221,8 +226,8 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are runtime tracing and performance
-evaluation. The active project milestone is Stage 5 userspace runtime work.
+The next memory-related milestone is performance evaluation. The active project
+milestone is Stage 5 userspace runtime work.
 
 Common boot output:
 
@@ -365,6 +370,25 @@ user: syscall validation passed
 milestone 27: syscall validation
 ```
 
+Runtime tracing scenario output:
+
+```text
+scenario: runtime-tracing
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: syscall yield
+user: syscall sleep ticks=0x0000000000000002
+user: accel memset timeout
+user: accel memset
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
+user: runtime tracing passed
+trace: begin count=... overwrites=...
+trace: seq=... tick=... cycle=... type=user_syscall_enter tid=... other=... arg0=... arg1=...
+trace: ...
+trace: end
+milestone 28: runtime tracing
+```
+
 Usercopy scenario output:
 
 ```text
@@ -444,7 +468,7 @@ thread: mutex-c locking
 thread: mutex-c acquired
 milestone 10: scheduler tracing
 trace: begin count=... overwrites=...
-trace: seq=... tick=... type=context_switch tid=... other=... arg0=...
+trace: seq=... tick=... cycle=... type=context_switch tid=... other=... arg0=... arg1=...
 trace: ...
 trace: end
 ```
@@ -583,6 +607,7 @@ make test SCENARIO=syscall-basic
 make test SCENARIO=user-runtime
 make test SCENARIO=user-accelerator
 make test SCENARIO=syscall-negative
+make test SCENARIO=runtime-tracing
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -610,6 +635,7 @@ make test SCENARIO=syscall-basic
 make test SCENARIO=user-runtime
 make test SCENARIO=user-accelerator
 make test SCENARIO=syscall-negative
+make test SCENARIO=runtime-tracing
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -661,6 +687,8 @@ The current scenarios are:
   backed by task-aware usercopy, timeout cleanup, and a kernel bounce buffer
 - `syscall-negative`: validates unknown syscall return behavior and invalid
   userspace accelerator request rejection
+- `runtime-tracing`: validates cycle-stamped trace events across user syscall,
+  usercopy validation/copyback, and accelerator driver boundaries
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -715,6 +743,7 @@ Stage 5 evidence matrix:
 | PR4 | Userspace runtime and syscall stubs | `user-runtime` | `milestone 25: userspace runtime` | `make test SCENARIO=user-runtime` |
 | PR5 | Userspace accelerator syscall API | `user-accelerator` | `milestone 26: user accelerator API` | `make test SCENARIO=user-accelerator` |
 | PR6 | Syscall and usercopy negative validation | `syscall-negative` | `milestone 27: syscall validation` | `make test SCENARIO=syscall-negative` |
+| PR7 | Runtime and accelerator trace infrastructure | `runtime-tracing` | `milestone 28: runtime tracing` | `make test SCENARIO=runtime-tracing` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -732,12 +761,14 @@ accelerator-backed `memset` work through a scalar syscall while the kernel uses
 task-aware usercopy, timeout reset cleanup, and a bounce buffer for copyback,
 unsupported scheduled user syscalls return `USER_SYSCALL_ERR_UNKNOWN`, invalid
 accelerator syscall pointers, lengths, write permissions, wraparound ranges,
-and timeout recovery stay contained, safe usercopy validates ranges before
-copying, cross-page usercopy succeeds, recoverable usercopy faults return an
-error, one thread times out while waiting for a mutex, the idle task runs while
-all real threads are blocked, a later thread can still acquire the mutex after
-the owner unlocks, the trace dump includes key events such as context switches,
-idle entry, wait timeout, and mutex timeout, and the driver framework binds a
+and timeout recovery stay contained, runtime tracing records cycle-stamped user
+syscall, user accelerator validation/copyback, and accelerator driver lifecycle
+events, safe usercopy validates ranges before copying, cross-page usercopy
+succeeds, recoverable usercopy faults return an error, one thread times out
+while waiting for a mutex, the idle task runs while all real threads are
+blocked, a later thread can still acquire the mutex after the owner unlocks,
+the trace dump includes key events such as context switches, idle entry, wait
+timeout, and mutex timeout, and the driver framework binds a
 simulated accelerator device by compatible string before validating MMIO-backed
 driver operations. The accelerator-register scenario proves reset-to-idle,
 synchronous start-to-done, IRQ acknowledgement without state reset, invalid

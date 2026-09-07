@@ -20,6 +20,7 @@
 #define SCENARIO_USER_RUNTIME 17
 #define SCENARIO_USER_ACCELERATOR 18
 #define SCENARIO_SYSCALL_NEGATIVE 19
+#define SCENARIO_RUNTIME_TRACING 20
 
 void scenario_run(void) __attribute__((noreturn));
 

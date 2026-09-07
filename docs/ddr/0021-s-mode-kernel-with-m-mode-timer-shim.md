@@ -26,6 +26,7 @@ M-mode owns:
 - initial boot handoff
 - PMP setup allowing S-mode to access RAM and MMIO
 - `satp` installation before entering S-mode
+- S-mode counter access enablement for time and cycle reads
 - machine timer compare programming
 - reflection of completed timer deadlines as supervisor timer interrupts
 

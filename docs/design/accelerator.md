@@ -413,6 +413,12 @@ simulated accelerator and dispatches pending IRQs while the user task is alive.
 That keeps the test faithful to the Stage 4 interrupt-completion path without
 adding a global hardware event loop yet.
 
+Runtime tracing records both sides of this boundary. `accel_syscall.c` emits
+user accelerator validation and copyback events because it owns the user virtual
+address and usercopy policy. `accel.c` emits driver submit, complete, timeout,
+and reset events because it owns the kernel descriptor and simulated device
+request slot.
+
 The `user-accelerator` scenario verifies:
 
 - C userspace can call the named accelerator runtime stub

@@ -47,6 +47,7 @@ static user_task_t syscall_basic_task;
 static user_task_t user_runtime_task;
 static user_task_t user_accelerator_task;
 static user_task_t syscall_negative_task;
+static user_task_t runtime_tracing_task;
 static size_t user_lifecycle_initial_free;
 static volatile int accel_timeout_submit_started;
 static volatile int accel_timeout_observed;
@@ -67,6 +68,7 @@ static void scenario_syscall_basic(void) __attribute__((noreturn));
 static void scenario_user_runtime(void) __attribute__((noreturn));
 static void scenario_user_accelerator(void) __attribute__((noreturn));
 static void scenario_syscall_negative(void) __attribute__((noreturn));
+static void scenario_runtime_tracing(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
@@ -971,6 +973,75 @@ static void scenario_syscall_negative(void)
     thread_start();
 }
 
+static void runtime_tracing_observer_thread(void *arg)
+{
+    (void)arg;
+
+    const uint64_t start_ticks = timer_ticks();
+    while (timer_ticks() - start_ticks < 8u) {
+        thread_yield();
+    }
+
+    while (user_task_state(&runtime_tracing_task) != USER_TASK_DESTROYED) {
+        platform_accel_step();
+        platform_dispatch_pending_irqs();
+        thread_yield();
+    }
+
+    if (user_task_exit_code(&runtime_tracing_task) != 0) {
+        PANIC("runtime tracing recorded wrong exit code");
+    }
+
+    console_write("user: runtime tracing passed\n");
+    trace_dump();
+    console_write("milestone 28: runtime tracing\n");
+    thread_exit();
+}
+
+static void scenario_runtime_tracing(void)
+{
+    console_write("scenario: runtime-tracing\n");
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("runtime tracing accelerator reset failed");
+    }
+
+    const size_t user_program_size =
+        (size_t)(user_runtime_end - user_runtime_start);
+    if (user_task_init(
+            &runtime_tracing_task,
+            user_runtime_start,
+            user_program_size
+        ) < 0) {
+        PANIC("runtime tracing task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&runtime_tracing_task);
+    if (frame == NULL) {
+        PANIC("runtime tracing missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user("runtime-tracing", &runtime_tracing_task) < 0 ||
+        thread_create(
+            "runtime-tracing-observer",
+            runtime_tracing_observer_thread,
+            NULL
+        ) < 0) {
+        PANIC("runtime tracing thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&runtime_tracing_task));
+    console_write("\n");
+
+    thread_start();
+}
+
 static void expect_usercopy_invalid(int result, const char *name)
 {
     if (result != USERCOPY_ERR_INVALID) {
@@ -1810,6 +1881,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_SYSCALL_NEGATIVE) {
         scenario_syscall_negative();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_RUNTIME_TRACING) {
+        scenario_runtime_tracing();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {

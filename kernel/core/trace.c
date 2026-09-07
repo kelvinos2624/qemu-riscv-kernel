@@ -1,3 +1,4 @@
+#include "arch/riscv64/csr.h"
 #include "arch/riscv64/irq.h"
 #include "core/kernel.h"
 #include "core/trace.h"
@@ -10,10 +11,12 @@
 typedef struct trace_event {
     uint64_t seq;
     uint64_t tick;
+    uint64_t cycle;
     trace_type_t type;
     tid_t tid;
     tid_t other_tid;
     uint64_t arg0;
+    uint64_t arg1;
 } trace_event_t;
 
 static trace_event_t trace_events[TRACE_CAPACITY];
@@ -51,6 +54,24 @@ static const char *trace_type_name(trace_type_t type)
         return "mutex_unlock";
     case TRACE_IDLE:
         return "idle";
+    case TRACE_USER_SYSCALL_ENTER:
+        return "user_syscall_enter";
+    case TRACE_USER_SYSCALL_RETURN:
+        return "user_syscall_return";
+    case TRACE_USER_SYSCALL_ERROR:
+        return "user_syscall_error";
+    case TRACE_USER_ACCEL_VALIDATE:
+        return "user_accel_validate";
+    case TRACE_USER_ACCEL_COPYBACK:
+        return "user_accel_copyback";
+    case TRACE_ACCEL_SUBMIT:
+        return "accel_submit";
+    case TRACE_ACCEL_COMPLETE:
+        return "accel_complete";
+    case TRACE_ACCEL_TIMEOUT:
+        return "accel_timeout";
+    case TRACE_ACCEL_RESET:
+        return "accel_reset";
     default:
         return "unknown";
     }
@@ -68,7 +89,13 @@ void trace_init(void)
     irq_restore(irq_state);
 }
 
-void trace_emit(trace_type_t type, tid_t tid, tid_t other_tid, uint64_t arg0)
+void trace_emit(
+    trace_type_t type,
+    tid_t tid,
+    tid_t other_tid,
+    uint64_t arg0,
+    uint64_t arg1
+)
 {
     irq_state_t irq_state = irq_save();
 
@@ -84,10 +111,12 @@ void trace_emit(trace_type_t type, tid_t tid, tid_t other_tid, uint64_t arg0)
 
     trace_events[index].seq = trace_next_seq++;
     trace_events[index].tick = timer_ticks();
+    trace_events[index].cycle = csr_read_cycle();
     trace_events[index].type = type;
     trace_events[index].tid = tid;
     trace_events[index].other_tid = other_tid;
     trace_events[index].arg0 = arg0;
+    trace_events[index].arg1 = arg1;
 
     irq_restore(irq_state);
 }
@@ -110,6 +139,8 @@ void trace_dump(void)
         console_write_hex64(event->seq);
         console_write(" tick=");
         console_write_hex64(event->tick);
+        console_write(" cycle=");
+        console_write_hex64(event->cycle);
         console_write(" type=");
         console_write(trace_type_name(event->type));
         console_write(" tid=");
@@ -118,6 +149,8 @@ void trace_dump(void)
         console_write_hex64(event->other_tid);
         console_write(" arg0=");
         console_write_hex64(event->arg0);
+        console_write(" arg1=");
+        console_write_hex64(event->arg1);
         console_write("\n");
     }
 
