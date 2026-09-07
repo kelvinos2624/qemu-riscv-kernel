@@ -12,6 +12,7 @@ GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic user-runtime user-accelerator syscall-negative runtime-tracing benchmark-syscall benchmark-scheduler benchmark-accelerator usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 STAGE4_SCENARIOS := driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+STAGE5_SCENARIOS := user-satp user-task syscall-basic user-runtime user-accelerator syscall-negative runtime-tracing benchmark-syscall benchmark-scheduler benchmark-accelerator
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
 CONFIG_TRACE ?= $(if $(filter benchmark-%,$(SCENARIO)),0,1)
@@ -121,7 +122,7 @@ USER_RUNTIME_OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(USER_RUNTIME
 USER_RUNTIME_OBJS += $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(USER_RUNTIME_SRCS)))
 DEPS := $(KERNEL_OBJS:.o=.d) $(USER_RUNTIME_OBJS:.o=.d)
 
-.PHONY: all run debug test test-all test-stage4 test-one boot-test clean toolcheck FORCE
+.PHONY: all run debug test test-all test-stage4 test-stage5 test-one boot-test clean toolcheck FORCE
 
 all: $(KERNEL_ELF) $(KERNEL_BIN)
 
@@ -151,6 +152,12 @@ test-all:
 test-stage4:
 	@for scenario in $(STAGE4_SCENARIOS); do \
 		echo "==> stage4 smoke test: $$scenario"; \
+		$(MAKE) --no-print-directory test-one SCENARIO=$$scenario || exit $$?; \
+	done
+
+test-stage5:
+	@for scenario in $(STAGE5_SCENARIOS); do \
+		echo "==> stage5 smoke test: $$scenario"; \
 		$(MAKE) --no-print-directory test-one SCENARIO=$$scenario || exit $$?; \
 	done
 
