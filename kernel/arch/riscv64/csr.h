@@ -20,6 +20,7 @@
 #define SIE_STIE (1u << 5)
 #define MIP_STIP (1u << 5)
 #define SATP_MODE_SV39 ((uint64_t)8 << 60)
+#define MCOUNTEREN_CY (1u << 0)
 #define MCOUNTEREN_TM (1u << 1)
 #define PMP_R (1u << 0)
 #define PMP_W (1u << 1)
@@ -128,6 +129,13 @@ static inline uint64_t csr_read_satp(void)
 {
     uint64_t value;
     __asm__ volatile("csrr %0, satp" : "=r"(value));
+    return value;
+}
+
+static inline uint64_t csr_read_cycle(void)
+{
+    uint64_t value;
+    __asm__ volatile("rdcycle %0" : "=r"(value));
     return value;
 }
 

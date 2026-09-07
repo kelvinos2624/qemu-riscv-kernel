@@ -1,6 +1,7 @@
 #include "arch/riscv64/accel_platform.h"
 #include "arch/riscv64/irq.h"
 #include "core/thread.h"
+#include "core/trace.h"
 #include "drivers/accel.h"
 #include "drivers/accel_cmd.h"
 #include "drivers/mmio.h"
@@ -15,6 +16,7 @@ typedef struct accel_request_state {
     int completed;
     int result;
     int reset_required_after_timeout;
+    tid_t submitter_tid;
 } accel_request_state_t;
 
 static accel_request_state_t accel_request;
@@ -42,6 +44,7 @@ static int accel_probe(device_t *dev)
     accel_request.completed = 0;
     accel_request.result = ACCEL_ERR_IO;
     accel_request.reset_required_after_timeout = 0;
+    accel_request.submitter_tid = THREAD_INVALID_TID;
     return 0;
 }
 
@@ -75,6 +78,13 @@ static void accel_irq_handler(device_t *dev)
         accel_request.result = ACCEL_ERR_IO;
     }
     accel_request.completed = 1;
+    trace_emit(
+        TRACE_ACCEL_COMPLETE,
+        accel_request.submitter_tid,
+        thread_current_tid(),
+        (uint64_t)(int64_t)accel_request.result,
+        accel_request.cmd->status
+    );
 
     mmio_fence_before_device_write();
     mmio_write32(base + ACCEL_REG_IRQ_ACK, known_irq);
@@ -219,6 +229,13 @@ int accel_write_control_raw(uint32_t control)
     platform_accel_step();
     if ((control & ACCEL_CONTROL_RESET) != 0) {
         accel_request.reset_required_after_timeout = 0;
+        trace_emit(
+            TRACE_ACCEL_RESET,
+            thread_current_tid(),
+            THREAD_INVALID_TID,
+            control,
+            ACCEL_OK
+        );
     }
     irq_restore(irq_state);
     return ACCEL_OK;
@@ -270,7 +287,15 @@ int accel_submit_sync_timeout(accel_cmd_t *cmd, uint64_t ticks)
     accel_request.in_use = 1;
     accel_request.completed = 0;
     accel_request.result = ACCEL_ERR_IO;
+    accel_request.submitter_tid = thread_current_tid();
     cmd->status = ACCEL_CMD_STATUS_PENDING;
+    trace_emit(
+        TRACE_ACCEL_SUBMIT,
+        accel_request.submitter_tid,
+        THREAD_INVALID_TID,
+        cmd->len,
+        ticks
+    );
 
     mmio_fence_before_device_write();
     mmio_write64(base + ACCEL_REG_CMD_BASE, (uint64_t)(uintptr_t)cmd);
@@ -288,6 +313,13 @@ int accel_submit_sync_timeout(accel_cmd_t *cmd, uint64_t ticks)
             cmd->status = ACCEL_CMD_STATUS_TIMEOUT;
             accel_request.reset_required_after_timeout = 1;
             result = ACCEL_ERR_TIMEOUT;
+            trace_emit(
+                TRACE_ACCEL_TIMEOUT,
+                accel_request.submitter_tid,
+                THREAD_INVALID_TID,
+                ticks,
+                cmd->status
+            );
             break;
         }
     }
@@ -299,6 +331,7 @@ int accel_submit_sync_timeout(accel_cmd_t *cmd, uint64_t ticks)
     accel_request.in_use = 0;
     accel_request.completed = 0;
     accel_request.result = ACCEL_ERR_IO;
+    accel_request.submitter_tid = THREAD_INVALID_TID;
 
     irq_restore(irq_state);
     return result;

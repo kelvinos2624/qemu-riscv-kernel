@@ -40,7 +40,7 @@ void machine_init(void)
     csr_write_mscratch((uint64_t)(uintptr_t)__machine_stack_top);
     csr_write_medeleg(delegated_exceptions);
     csr_write_mideleg(1ull << SCAUSE_SUPERVISOR_TIMER_INTERRUPT);
-    csr_write_mcounteren(MCOUNTEREN_TM);
+    csr_write_mcounteren(MCOUNTEREN_CY | MCOUNTEREN_TM);
     csr_set_mie(MIE_MTIE);
 }
 

@@ -1,5 +1,6 @@
 #include "core/kernel.h"
 #include "core/thread.h"
+#include "core/trace.h"
 #include "core/trap.h"
 #include "drivers/accel.h"
 #include "drivers/accel_cmd.h"
@@ -8,6 +9,7 @@
 #include "user/accel_syscall.h"
 #include "user/task.h"
 #include "user_accel.h"
+#include "user_abi.h"
 
 _Static_assert(USER_ACCEL_OK == ACCEL_OK, "user accel ok value");
 _Static_assert(USER_ACCEL_ERR_NO_DEVICE == ACCEL_ERR_NO_DEVICE, "user accel no device value");
@@ -33,6 +35,17 @@ static int user_accel_copyback_result(int result)
     return result;
 }
 
+static void user_accel_trace(trace_type_t type, uint64_t arg0, uint64_t arg1)
+{
+    trace_emit(
+        type,
+        thread_current_tid(),
+        THREAD_INVALID_TID,
+        arg0,
+        arg1
+    );
+}
+
 static void user_accel_reset_after_timeout(void)
 {
     if (accel_reset() != ACCEL_OK) {
@@ -49,11 +62,23 @@ static int user_accel_memset_impl(
 )
 {
     if (len_arg == 0 || len_arg > USER_ACCEL_MEMSET_MAX_LEN) {
+        user_accel_trace(
+            TRACE_USER_ACCEL_VALIDATE,
+            len_arg,
+            (uint64_t)(int64_t)USER_ACCEL_ERR_INVALID
+        );
         return USER_ACCEL_ERR_INVALID;
     }
 
     const size_t len = (size_t)len_arg;
     int result = usercopy_task_validate(task, user_dst, len, 1);
+    user_accel_trace(
+        TRACE_USER_ACCEL_VALIDATE,
+        len,
+        result == USERCOPY_OK ?
+            USER_ACCEL_OK :
+            (uint64_t)(int64_t)USER_ACCEL_ERR_INVALID
+    );
     if (result != USERCOPY_OK) {
         return USER_ACCEL_ERR_INVALID;
     }
@@ -84,8 +109,14 @@ static int user_accel_memset_impl(
     }
 
     if (result == USER_ACCEL_OK) {
-        if (copy_to_user_task(task, (void *)user_dst, bounce_page, len) !=
-            USERCOPY_OK) {
+        const int copy_result =
+            copy_to_user_task(task, (void *)user_dst, bounce_page, len);
+        user_accel_trace(
+            TRACE_USER_ACCEL_COPYBACK,
+            len,
+            (uint64_t)(int64_t)copy_result
+        );
+        if (copy_result != USERCOPY_OK) {
             result = USER_ACCEL_ERR_INVALID;
         }
     }
@@ -116,6 +147,13 @@ trap_frame_t *user_accel_syscall_memset(trap_frame_t *frame)
 
     frame->mepc += 4;
     frame->a0 = (uint64_t)(int64_t)result;
+    trace_emit(
+        TRACE_USER_SYSCALL_RETURN,
+        thread_current_tid(),
+        THREAD_INVALID_TID,
+        USER_SYSCALL_ACCEL_MEMSET,
+        (uint64_t)(int64_t)result
+    );
     if (result == USER_ACCEL_OK) {
         console_write("user: accel memset\n");
     } else if (result == USER_ACCEL_ERR_TIMEOUT) {

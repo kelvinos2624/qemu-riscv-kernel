@@ -11,7 +11,7 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
 CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic user-runtime user-accelerator syscall-negative usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic user-runtime user-accelerator syscall-negative runtime-tracing usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 STAGE4_SCENARIOS := driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
@@ -34,6 +34,7 @@ SCENARIO_ID_syscall-basic := 16
 SCENARIO_ID_user-runtime := 17
 SCENARIO_ID_user-accelerator := 18
 SCENARIO_ID_syscall-negative := 19
+SCENARIO_ID_runtime-tracing := 20
 CONFIG_SCENARIO_ID := $(SCENARIO_ID_$(SCENARIO))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
@@ -101,6 +102,7 @@ KERNEL_SRCS := \
 USER_PROGRAM_SRC_user-runtime := user/programs/runtime_main.c
 USER_PROGRAM_SRC_user-accelerator := user/programs/accelerator_main.c
 USER_PROGRAM_SRC_syscall-negative := user/programs/syscall_negative_main.c
+USER_PROGRAM_SRC_runtime-tracing := user/programs/runtime_tracing_main.c
 USER_PROGRAM_SRC := $(or $(USER_PROGRAM_SRC_$(SCENARIO)),user/programs/runtime_main.c)
 
 USER_RUNTIME_SRCS := \
