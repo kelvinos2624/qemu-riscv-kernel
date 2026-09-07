@@ -282,6 +282,21 @@ The safe-usercopy layer exposes:
 ```c
 int copy_from_user(void *dst, const void *user_src, size_t len);
 int copy_to_user(void *user_dst, const void *src, size_t len);
+int usercopy_task_validate(
+    const struct user_task *task,
+    uintptr_t user_va,
+    size_t len,
+    int write);
+int copy_from_user_task(
+    const struct user_task *task,
+    void *dst,
+    const void *user_src,
+    size_t len);
+int copy_to_user_task(
+    const struct user_task *task,
+    void *user_dst,
+    const void *src,
+    size_t len);
 ```
 
 Both functions use an all-or-error contract: they return `0` only when the full
@@ -317,9 +332,27 @@ user pointer range. `copy_from_user()` recovers only load page faults;
 against stale translations or future races while still allowing unrelated kernel
 faults inside the copy helper to panic normally.
 
-The current implementation supports cross-page copies. It does not yet validate
-against a per-process page table because separate user address spaces are not
-active yet.
+The legacy `copy_from_user()` and `copy_to_user()` helpers validate through the
+kernel page table. They preserve the PR9 scenario contract where user test pages
+are still temporarily mapped in the active kernel address space.
+
+Scheduled Stage 5 user tasks use the task-aware helpers instead. Those helpers
+validate against the supplied `user_task_t` address space, then copy through the
+physical frame returned by `vm_get_mapping()`. The kernel's current identity map
+means that managed RAM physical addresses are also valid kernel pointers, so
+the task-aware path does not need to enable `SSTATUS_SUM` or dereference user
+virtual addresses directly.
+
+The task-aware helpers preserve this boundary:
+
+```text
+Syscall code may copy bytes to or from a ready task's mapped user pages, but it
+must not grant devices direct access to user virtual addresses or user-owned
+frames.
+```
+
+The current implementation supports cross-page copies in both legacy and
+task-aware paths.
 
 ## Stage 4 Driver Readiness Notes
 
@@ -353,11 +386,15 @@ not prove that the caller currently owns the frame. The accelerator descriptor
 API still requires callers to allocate and retain the pages they submit.
 
 User virtual addresses must never be passed directly to the simulated device.
-Kernel-only driver scenarios can begin with kernel-owned buffers. The initial
-Stage 5 syscall ABI intentionally carries only integer arguments. Later
-userspace-facing driver syscalls should use `copy_from_user()` and
-`copy_to_user()` for descriptor-sized metadata, then validate and pin or copy
-payload buffers before constructing device command descriptors.
+Kernel-only driver scenarios can use kernel-owned buffers directly. The first
+userspace-facing accelerator syscall preserves isolation with a kernel-owned
+bounce buffer: syscall code validates the user destination through the
+scheduled task's page table, submits accelerator work against a page-allocated
+kernel buffer, and copies the completed bytes back with `copy_to_user_task()`.
+If the request times out after device submission, syscall code resets the
+accelerator before returning the descriptor and bounce page to the allocator.
+Future descriptor-shaped APIs still need an explicit pin/copy policy before a
+device can touch caller-provided payload memory.
 
 `vm_get_mapping()` can help inspect the active page table for mapped physical
 addresses and PTE flags, but it is only a translation mechanism. Driver policy
@@ -523,4 +560,16 @@ trap: page fault access=load
 milestone 14: user address space skeleton
 milestone 15: first user task
 milestone 16: safe usercopy
+```
+
+The `user-accelerator` scenario verifies that task-aware usercopy can copy back
+accelerator-produced data into a scheduled U-mode task address space without
+mapping the user page into the device command:
+
+```text
+scenario: user-accelerator
+user: accel memset timeout
+user: accel memset
+user: accelerator memset passed
+milestone 26: user accelerator API
 ```

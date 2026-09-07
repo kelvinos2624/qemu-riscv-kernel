@@ -89,6 +89,7 @@ struct trap_frame *thread_maybe_preempt_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_exit_current_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_yield_current_from_trap(struct trap_frame *frame);
 struct trap_frame *thread_sleep_current_from_trap(struct trap_frame *frame, uint64_t ticks);
+void thread_set_current_trap_frame_from_trap(struct trap_frame *frame);
 struct user_task *thread_current_user_task_for_frame(const struct trap_frame *frame);
 
 #endif

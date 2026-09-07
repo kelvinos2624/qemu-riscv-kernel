@@ -2,6 +2,7 @@
 #include "core/kernel.h"
 #include "core/thread.h"
 #include "core/trap.h"
+#include "user/accel_syscall.h"
 #include "user/task.h"
 #include "user/syscall.h"
 
@@ -96,6 +97,10 @@ trap_frame_t *user_syscall_dispatch(trap_frame_t *frame)
 
     if (frame->a7 == USER_SYSCALL_SLEEP) {
         return user_syscall_sleep(frame);
+    }
+
+    if (frame->a7 == USER_SYSCALL_ACCEL_MEMSET) {
+        return user_accel_syscall_memset(frame);
     }
 
     console_write("\ntrap: unknown user ecall syscall=");

@@ -2,13 +2,34 @@
 #define KERNEL_MEMORY_USERCOPY_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #define USERCOPY_OK 0
 #define USERCOPY_ERR_INVALID (-1)
 #define USERCOPY_ERR_FAULT (-2)
 
+struct user_task;
+
 int copy_from_user(void *dst, const void *user_src, size_t len);
 int copy_to_user(void *user_dst, const void *src, size_t len);
+int usercopy_task_validate(
+    const struct user_task *task,
+    uintptr_t user_va,
+    size_t len,
+    int write
+);
+int copy_from_user_task(
+    const struct user_task *task,
+    void *dst,
+    const void *user_src,
+    size_t len
+);
+int copy_to_user_task(
+    const struct user_task *task,
+    void *user_dst,
+    const void *src,
+    size_t len
+);
 
 /*
  * Scenario-only hook that bypasses validation to prove the recoverable
