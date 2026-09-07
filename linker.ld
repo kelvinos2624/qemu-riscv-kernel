@@ -53,6 +53,11 @@ SECTIONS
     }
 
     . = ALIGN(16);
+    PROVIDE(__machine_stack_bottom = .);
+    . += 4K;
+    PROVIDE(__machine_stack_top = .);
+
+    . = ALIGN(16);
     PROVIDE(__stack_bottom = .);
     . += 16K;
     PROVIDE(__stack_top = .);

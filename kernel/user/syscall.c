@@ -103,10 +103,9 @@ trap_frame_t *user_syscall_dispatch(trap_frame_t *frame)
         return user_accel_syscall_memset(frame);
     }
 
-    console_write("\ntrap: unknown user ecall syscall=");
-    console_write_hex64(frame->a7);
-    console_write(" sepc=");
-    console_write_hex64(frame->mepc);
-    console_write("\n");
-    PANIC("unknown user syscall");
+    user_syscall_require_task(frame);
+    user_syscall_advance(frame);
+    frame->a0 = (uint64_t)(int64_t)USER_SYSCALL_ERR_UNKNOWN;
+    console_write("user: unknown syscall\n");
+    return frame;
 }

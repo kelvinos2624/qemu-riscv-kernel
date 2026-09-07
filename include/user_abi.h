@@ -7,5 +7,6 @@
 #define USER_SYSCALL_ACCEL_MEMSET 4u
 
 #define USER_SYSCALL_OK 0
+#define USER_SYSCALL_ERR_UNKNOWN (-1)
 
 #endif

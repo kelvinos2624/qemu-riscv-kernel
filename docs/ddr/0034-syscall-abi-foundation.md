@@ -70,6 +70,10 @@ Unknown syscalls panic for now. That is intentionally strict for the foundation
 PR: it exposes accidental ABI mismatches immediately instead of inventing an
 error-number contract before the runtime and negative tests exist.
 
+DDR 37 supersedes this temporary unknown-syscall policy for scheduled user
+tasks. Unknown scheduled user syscall numbers now return
+`USER_SYSCALL_ERR_UNKNOWN`.
+
 This PR avoids pointer-bearing syscalls. That defers the harder usercopy policy:
 which layer validates user buffers, when `SUM` is enabled, and whether payloads
 are copied or pinned for device work.

@@ -108,10 +108,11 @@ The first kernel page table is identity-mapped. Text is mapped read/execute,
 rodata read-only, writable kernel memory read/write, and MMIO read/write. Later
 work can move to a higher-half layout or add finer mapping policy.
 
-The M-mode trap path currently uses the interrupted S-mode kernel stack. This is
-acceptable before U-mode exists because S-mode is always running on a kernel
-stack. U-mode support must revisit this and give M-mode its own emergency stack
-or avoid taking machine traps on user stacks.
+The M-mode trap path uses a linker-reserved emergency stack whose top is stored
+in `mscratch`. This became required once U-mode support arrived: machine timer
+interrupts can occur while S-mode is returning through a user trap path, and
+M-mode must not save privileged trap frames onto whatever stack pointer was
+interrupted.
 
 ## ECE350 and STM32 RTOS Connection
 

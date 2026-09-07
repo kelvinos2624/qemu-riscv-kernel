@@ -185,6 +185,10 @@ Stage 5 userspace runtime work has started:
 - userspace accelerator `memset` syscall using a kernel-owned bounce buffer
 - `user-accelerator` smoke scenario proving C userspace can request
   accelerator-backed work without exposing user pages to the device
+- `USER_SYSCALL_ERR_UNKNOWN` for unsupported scheduled user syscall numbers
+- `syscall-negative` smoke scenario proving unsupported syscalls and invalid
+  accelerator pointers, lengths, permissions, wraparound, and timeout recovery
+  stay contained
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -217,9 +221,8 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are syscall validation, runtime tracing, and
-performance evaluation. The active project milestone is Stage 5 userspace
-runtime work.
+The next memory-related milestones are runtime tracing and performance
+evaluation. The active project milestone is Stage 5 userspace runtime work.
 
 Common boot output:
 
@@ -340,6 +343,26 @@ user: exited code=0x0000000000000000
 milestone 22: user address-space switching
 user: accelerator memset passed
 milestone 26: user accelerator API
+```
+
+Syscall validation scenario output:
+
+```text
+scenario: syscall-negative
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: unknown syscall
+user: accel memset invalid
+user: accel memset invalid
+user: accel memset invalid
+user: accel memset invalid
+user: accel memset invalid
+user: accel memset invalid
+user: accel memset timeout
+user: accel memset
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
+user: syscall validation passed
+milestone 27: syscall validation
 ```
 
 Usercopy scenario output:
@@ -559,6 +582,7 @@ make test SCENARIO=user-task
 make test SCENARIO=syscall-basic
 make test SCENARIO=user-runtime
 make test SCENARIO=user-accelerator
+make test SCENARIO=syscall-negative
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -585,6 +609,7 @@ make test SCENARIO=user-task
 make test SCENARIO=syscall-basic
 make test SCENARIO=user-runtime
 make test SCENARIO=user-accelerator
+make test SCENARIO=syscall-negative
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -634,6 +659,8 @@ The current scenarios are:
   named syscall stubs
 - `user-accelerator`: validates a C userspace accelerator `memset` runtime API
   backed by task-aware usercopy, timeout cleanup, and a kernel bounce buffer
+- `syscall-negative`: validates unknown syscall return behavior and invalid
+  userspace accelerator request rejection
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -687,6 +714,7 @@ Stage 5 evidence matrix:
 | PR3 | Syscall ABI foundation | `syscall-basic` | `milestone 24: syscall ABI` | `make test SCENARIO=syscall-basic` |
 | PR4 | Userspace runtime and syscall stubs | `user-runtime` | `milestone 25: userspace runtime` | `make test SCENARIO=user-runtime` |
 | PR5 | Userspace accelerator syscall API | `user-accelerator` | `milestone 26: user accelerator API` | `make test SCENARIO=user-accelerator` |
+| PR6 | Syscall and usercopy negative validation | `syscall-negative` | `milestone 27: syscall validation` | `make test SCENARIO=syscall-negative` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -702,16 +730,18 @@ code can enter through `_start`, call named runtime syscall stubs, return from
 `user_main()`, and exit with that return code, C userspace can request
 accelerator-backed `memset` work through a scalar syscall while the kernel uses
 task-aware usercopy, timeout reset cleanup, and a bounce buffer for copyback,
-safe usercopy validates
-ranges before copying, cross-page usercopy succeeds, recoverable usercopy faults
-return an error, one thread times out while waiting for a mutex, the idle task
-runs while all real threads are blocked, a later thread can still acquire the
-mutex after the owner unlocks, the trace dump includes key events such as
-context switches, idle entry, wait timeout, and mutex timeout, and the driver
-framework binds a simulated accelerator device by compatible string before
-validating MMIO-backed driver operations. The accelerator-register scenario
-proves reset-to-idle, synchronous start-to-done, IRQ acknowledgement without
-state reset, invalid start-after-done error handling, and reset priority over start.
+unsupported scheduled user syscalls return `USER_SYSCALL_ERR_UNKNOWN`, invalid
+accelerator syscall pointers, lengths, write permissions, wraparound ranges,
+and timeout recovery stay contained, safe usercopy validates ranges before
+copying, cross-page usercopy succeeds, recoverable usercopy faults return an
+error, one thread times out while waiting for a mutex, the idle task runs while
+all real threads are blocked, a later thread can still acquire the mutex after
+the owner unlocks, the trace dump includes key events such as context switches,
+idle entry, wait timeout, and mutex timeout, and the driver framework binds a
+simulated accelerator device by compatible string before validating MMIO-backed
+driver operations. The accelerator-register scenario proves reset-to-idle,
+synchronous start-to-done, IRQ acknowledgement without state reset, invalid
+start-after-done error handling, and reset priority over start.
 The accelerator-descriptor scenario proves allocator-backed descriptor submission,
 safe page-contained execution, invalid descriptor/range rejection, and
 deterministic lifecycle rejection before reset. The accelerator IRQ-completion
@@ -729,7 +759,6 @@ Planned test categories:
 - boot and trap integration tests
 - scheduler fairness and preemption tests
 - allocator invariant tests
-- syscall validation and negative tests
 - driver completion and timeout tests
 - benchmark workloads for syscall, context switch, interrupt, and accelerator
   latency

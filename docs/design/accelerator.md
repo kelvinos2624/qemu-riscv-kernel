@@ -435,6 +435,25 @@ user: accelerator memset passed
 milestone 26: user accelerator API
 ```
 
+The `syscall-negative` scenario verifies the failure side of the same API:
+null destinations, zero lengths, oversized lengths, unmapped destinations,
+read-only code-page destinations, wraparound ranges, and timeout recovery all
+return controlled user-visible errors. Rejected invalid requests do not submit
+device work, and timeout recovery still allows a later valid request to
+complete.
+
+The scenario prints:
+
+```text
+scenario: syscall-negative
+user: unknown syscall
+user: accel memset invalid
+user: accel memset timeout
+user: accel memset
+user: syscall validation passed
+milestone 27: syscall validation
+```
+
 ## Course Connection
 
 The ECE350 connection is the distinction between a condition and a notification.

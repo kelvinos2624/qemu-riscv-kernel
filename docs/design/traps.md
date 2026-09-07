@@ -15,6 +15,11 @@ machine-timer completion as a supervisor timer interrupt. It must not inspect or
 mutate scheduler queues, thread state, wait queues, mutex state, heap metadata,
 page allocator metadata, trace buffers, or address-space policy.
 
+`machine_trap_entry` switches through `mscratch` onto a linker-reserved
+M-mode emergency stack before saving registers. Machine timer interrupts can
+arrive while S-mode is returning to U-mode or otherwise has a non-kernel `sp`,
+so M-mode must not trust the interrupted stack pointer.
+
 S-mode uses direct `stvec` with `trap_entry` while normal kernel code is
 running. Normal kernel traps enter the S-mode C trap handler, `trap_handle`, and
 return through `sret`.
@@ -152,6 +157,7 @@ The initial ABI uses `a7` as the syscall number, `a0` as the first argument, and
 2: yield() -> 0
 3: sleep(ticks) -> 0
 4: accel_memset(dst, len, value, timeout_ticks) -> status
+unknown scheduled user syscall -> USER_SYSCALL_ERR_UNKNOWN
 ```
 
 The dispatcher owns syscall policy:
@@ -161,7 +167,7 @@ The dispatcher owns syscall policy:
 - preserve the legacy `first-user` exit continuation
 - route `yield` and `sleep` onto scheduler trap-return mechanisms
 - route accelerator calls to the user/accelerator syscall boundary module
-- panic on unknown syscall numbers
+- return `USER_SYSCALL_ERR_UNKNOWN` for unsupported scheduled user syscalls
 
 Scheduled user tasks use the Stage 5 trampoline path. Their exit syscall records
 the exit code in `user_task_t`, retires the associated thread, switches to the
@@ -174,6 +180,11 @@ This is still a narrow syscall ABI. It is now enough to prove that scheduled
 U-mode code can intentionally return control to the kernel, request
 scheduler-visible blocking, receive a simple integer result, and pass a
 validated pointer to a syscall-owned copy boundary.
+
+Unsupported syscall numbers from scheduled U-mode tasks advance `sepc` and
+return `USER_SYSCALL_ERR_UNKNOWN`. The dispatcher still panics for kernel-path
+misuse such as a null trap frame or scheduler-only syscall without a current
+scheduled user task.
 
 ## Userspace Runtime
 
@@ -237,7 +248,5 @@ the broken invariant.
 
 ## Next Work
 
-- Add negative syscall and usercopy validation scenarios for invalid pointers,
-  unsupported syscall numbers, timeout failures, and boundary lengths.
 - Add user data/BSS mappings or a real loader when user programs need globals
   or string literals.
