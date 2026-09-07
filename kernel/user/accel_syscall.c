@@ -116,10 +116,14 @@ trap_frame_t *user_accel_syscall_memset(trap_frame_t *frame)
 
     frame->mepc += 4;
     frame->a0 = (uint64_t)(int64_t)result;
-    if (result == USER_ACCEL_ERR_TIMEOUT) {
-        console_write("user: accel memset timeout\n");
-    } else {
+    if (result == USER_ACCEL_OK) {
         console_write("user: accel memset\n");
+    } else if (result == USER_ACCEL_ERR_TIMEOUT) {
+        console_write("user: accel memset timeout\n");
+    } else if (result == USER_ACCEL_ERR_INVALID) {
+        console_write("user: accel memset invalid\n");
+    } else {
+        console_write("user: accel memset error\n");
     }
     return frame;
 }

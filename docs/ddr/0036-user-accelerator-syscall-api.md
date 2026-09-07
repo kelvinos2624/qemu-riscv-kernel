@@ -97,7 +97,7 @@ frame ownership metadata, or an IOMMU-like policy.
 
 Accepting a userspace descriptor would be closer to a richer accelerator API,
 but it would force descriptor validation, payload pin/copy policy, and ABI
-versioning before the runtime has negative syscall tests.
+versioning before the runtime has broad negative syscall tests.
 
 Limiting the destination to one user page would simplify validation, but it
 would make usercopy less reusable and would expose an arbitrary ABI restriction

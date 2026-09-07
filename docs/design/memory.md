@@ -573,3 +573,15 @@ user: accel memset
 user: accelerator memset passed
 milestone 26: user accelerator API
 ```
+
+The `syscall-negative` scenario verifies that the accelerator syscall rejects
+bad user ranges before device submission:
+
+```text
+scenario: syscall-negative
+user: unknown syscall
+user: accel memset invalid
+user: accel memset timeout
+user: syscall validation passed
+milestone 27: syscall validation
+```

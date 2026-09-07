@@ -8,6 +8,7 @@
 #define PMP_ALL_MEMORY_NAPOT UINT64_MAX
 
 extern void machine_trap_entry(void);
+extern char __machine_stack_top[];
 
 static void machine_write_mtimecmp(uint64_t value)
 {
@@ -36,6 +37,7 @@ void machine_init(void)
     machine_allow_supervisor_memory_access();
     machine_write_mtimecmp(UINT64_MAX);
     csr_write_mtvec((uint64_t)(uintptr_t)machine_trap_entry);
+    csr_write_mscratch((uint64_t)(uintptr_t)__machine_stack_top);
     csr_write_medeleg(delegated_exceptions);
     csr_write_mideleg(1ull << SCAUSE_SUPERVISOR_TIMER_INTERRUPT);
     csr_write_mcounteren(MCOUNTEREN_TM);

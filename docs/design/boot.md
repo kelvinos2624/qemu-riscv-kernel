@@ -23,6 +23,10 @@ runs in S-mode.
 The linker script reserves a 16 KiB boot stack after `.bss` and exports
 `__stack_top`. The boot code loads this symbol into `sp` before calling `kmain`.
 
+The linker also reserves a small M-mode emergency stack. During machine-shim
+initialization, the kernel writes its top into `mscratch`; `machine_trap_entry`
+swaps onto it before saving registers for timer-shim traps.
+
 ## BSS
 
 The boot code clears memory from `__bss_start` to `__bss_end` using 64-bit

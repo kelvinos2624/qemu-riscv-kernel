@@ -303,11 +303,12 @@ trap_restore:
 
 .balign 4
 machine_trap_entry:
+    csrrw sp, mscratch, sp
     addi sp, sp, -TF_SIZE
 
     sd ra, TF_RA(sp)
     sd t0, TF_T0(sp)
-    addi t0, sp, TF_SIZE
+    csrr t0, mscratch
     sd t0, TF_SP(sp)
     sd gp, TF_GP(sp)
     sd tp, TF_TP(sp)
@@ -387,5 +388,8 @@ machine_trap_restore_frame:
     ld t4, TF_T4(sp)
     ld t5, TF_T5(sp)
     ld t6, TF_T6(sp)
+
+    addi t0, sp, TF_SIZE
+    csrw mscratch, t0
     ld sp, TF_SP(sp)
     mret
