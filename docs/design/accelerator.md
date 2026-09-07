@@ -12,9 +12,9 @@ driver ISR and wait queues. The timeout/error milestone makes failed waits and
 recovery policy explicit.
 
 This stage still does not implement real external interrupt-controller
-delivery, userspace syscalls, cancellation/reset of an already executing
-hardware command, or throughput measurements. Those belong to later Stage 4 and
-Stage 5 work.
+delivery or cancellation/reset of an already executing hardware command. Stage
+5 adds userspace syscalls and benchmark scenarios on top of the same simulated
+register model.
 
 ## Register Layout
 

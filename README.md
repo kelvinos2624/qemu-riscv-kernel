@@ -194,6 +194,11 @@ Stage 5 userspace runtime work has started:
 - cycle-stamped trace records with two event-specific metadata arguments
 - `runtime-tracing` smoke scenario proving Stage 5 runtime/device events appear
   in one structured trace dump
+- kernel-owned benchmark scenarios for syscall, scheduler, and accelerator
+  boundaries
+- `USER_SYSCALL_NOOP` as a minimal dispatcher benchmark syscall
+- `benchmark-syscall`, `benchmark-scheduler`, and `benchmark-accelerator`
+  smoke scenarios proving structured cycle-count output
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -226,8 +231,7 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestone is performance evaluation. The active project
-milestone is Stage 5 userspace runtime work.
+The next project milestone is Stage 5 integration cleanup.
 
 Common boot output:
 
@@ -387,6 +391,30 @@ trace: seq=... tick=... cycle=... type=user_syscall_enter tid=... other=... arg0
 trace: ...
 trace: end
 milestone 28: runtime tracing
+```
+
+Benchmark scenario output:
+
+```text
+scenario: benchmark-syscall
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
+bench: syscall_noop_task iterations=... cycles_total=... cycles_avg=...
+bench: syscall_noop_dispatch iterations=... cycles_total=... cycles_avg=... cycles_min=... cycles_max=...
+milestone 29: performance evaluation
+
+scenario: benchmark-scheduler
+bench: scheduler_yield_pair iterations=... cycles_total=... cycles_avg=...
+milestone 29: performance evaluation
+
+scenario: benchmark-accelerator
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
+bench: accelerator_user_memset iterations=... cycles_total=... cycles_avg=... bytes_total=...
+bench: accelerator_driver_memset iterations=... cycles_total=... cycles_avg=... bytes_total=...
+milestone 29: performance evaluation
 ```
 
 Usercopy scenario output:
@@ -608,6 +636,9 @@ make test SCENARIO=user-runtime
 make test SCENARIO=user-accelerator
 make test SCENARIO=syscall-negative
 make test SCENARIO=runtime-tracing
+make test SCENARIO=benchmark-syscall
+make test SCENARIO=benchmark-scheduler
+make test SCENARIO=benchmark-accelerator
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -636,6 +667,9 @@ make test SCENARIO=user-runtime
 make test SCENARIO=user-accelerator
 make test SCENARIO=syscall-negative
 make test SCENARIO=runtime-tracing
+make test SCENARIO=benchmark-syscall
+make test SCENARIO=benchmark-scheduler
+make test SCENARIO=benchmark-accelerator
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -647,11 +681,14 @@ make clean
 make toolcheck
 ```
 
-Tracing is compiled in by default. Build without tracing:
+Tracing is compiled in by default, except benchmark scenarios default to
+`CONFIG_TRACE=0` so their smoke output measures without trace instrumentation.
+Build any scenario with an explicit tracing policy:
 
 ```sh
 make clean
 make CONFIG_TRACE=0
+make test SCENARIO=benchmark-syscall CONFIG_TRACE=1
 ```
 
 ## Testing Strategy
@@ -689,6 +726,12 @@ The current scenarios are:
   userspace accelerator request rejection
 - `runtime-tracing`: validates cycle-stamped trace events across user syscall,
   usercopy validation/copyback, and accelerator driver boundaries
+- `benchmark-syscall`: validates structured kernel-owned cycle measurements for
+  a scheduled U-mode noop loop and the noop dispatcher body
+- `benchmark-scheduler`: validates structured cycle measurements for a pair of
+  kernel threads yielding back and forth
+- `benchmark-accelerator`: validates structured cycle measurements for a full
+  userspace accelerator memset path and a repeated kernel driver-only baseline
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -744,6 +787,7 @@ Stage 5 evidence matrix:
 | PR5 | Userspace accelerator syscall API | `user-accelerator` | `milestone 26: user accelerator API` | `make test SCENARIO=user-accelerator` |
 | PR6 | Syscall and usercopy negative validation | `syscall-negative` | `milestone 27: syscall validation` | `make test SCENARIO=syscall-negative` |
 | PR7 | Runtime and accelerator trace infrastructure | `runtime-tracing` | `milestone 28: runtime tracing` | `make test SCENARIO=runtime-tracing` |
+| PR8 | Latency and throughput benchmark scenarios | `benchmark-syscall`, `benchmark-scheduler`, `benchmark-accelerator` | `milestone 29: performance evaluation` | `make test SCENARIO=benchmark-syscall`; `make test SCENARIO=benchmark-scheduler`; `make test SCENARIO=benchmark-accelerator` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -763,11 +807,13 @@ unsupported scheduled user syscalls return `USER_SYSCALL_ERR_UNKNOWN`, invalid
 accelerator syscall pointers, lengths, write permissions, wraparound ranges,
 and timeout recovery stay contained, runtime tracing records cycle-stamped user
 syscall, user accelerator validation/copyback, and accelerator driver lifecycle
-events, safe usercopy validates ranges before copying, cross-page usercopy
-succeeds, recoverable usercopy faults return an error, one thread times out
-while waiting for a mutex, the idle task runs while all real threads are
-blocked, a later thread can still acquire the mutex after the owner unlocks,
-the trace dump includes key events such as context switches, idle entry, wait
+events, benchmark scenarios emit positive structured cycle measurements for
+noop syscall dispatch, scheduled U-mode noop loops, scheduler yield pairs, and
+accelerator user/driver paths, safe usercopy validates ranges before copying,
+cross-page usercopy succeeds, recoverable usercopy faults return an error, one
+thread times out while waiting for a mutex, the idle task runs while all real
+threads are blocked, a later thread can still acquire the mutex after the owner
+unlocks, the trace dump includes key events such as context switches, idle entry, wait
 timeout, and mutex timeout, and the driver framework binds a
 simulated accelerator device by compatible string before validating MMIO-backed
 driver operations. The accelerator-register scenario proves reset-to-idle,
@@ -791,8 +837,7 @@ Planned test categories:
 - scheduler fairness and preemption tests
 - allocator invariant tests
 - driver completion and timeout tests
-- benchmark workloads for syscall, context switch, interrupt, and accelerator
-  latency
+- Stage 5 integration cleanup and regression review
 
 ## Documentation Strategy
 

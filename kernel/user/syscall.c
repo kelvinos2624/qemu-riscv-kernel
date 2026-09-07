@@ -8,6 +8,7 @@
 #include "user/syscall.h"
 
 static uint64_t user_exit_code;
+static user_syscall_benchmark_t user_noop_benchmark;
 
 static void first_user_exit_return(void) __attribute__((noreturn));
 
@@ -84,6 +85,24 @@ static void user_syscall_require_task(trap_frame_t *frame)
     }
 }
 
+void user_syscall_benchmark_reset(void)
+{
+    user_noop_benchmark.iterations = 0;
+    user_noop_benchmark.cycles_total = 0;
+    user_noop_benchmark.cycles_min = UINT64_MAX;
+    user_noop_benchmark.cycles_max = 0;
+}
+
+user_syscall_benchmark_t user_syscall_benchmark_snapshot(void)
+{
+    user_syscall_benchmark_t snapshot = user_noop_benchmark;
+    if (snapshot.iterations == 0) {
+        snapshot.cycles_min = 0;
+    }
+
+    return snapshot;
+}
+
 static trap_frame_t *user_syscall_yield(trap_frame_t *frame)
 {
     user_syscall_require_task(frame);
@@ -118,12 +137,41 @@ static trap_frame_t *user_syscall_sleep(trap_frame_t *frame)
     return thread_sleep_current_from_trap(frame, ticks);
 }
 
+static trap_frame_t *user_syscall_noop(
+    trap_frame_t *frame,
+    uint64_t dispatch_start_cycle
+)
+{
+    user_syscall_require_task(frame);
+    user_syscall_advance(frame);
+    frame->a0 = USER_SYSCALL_OK;
+    user_syscall_trace(
+        TRACE_USER_SYSCALL_RETURN,
+        frame,
+        USER_SYSCALL_NOOP,
+        USER_SYSCALL_OK
+    );
+
+    const uint64_t elapsed = csr_read_cycle() - dispatch_start_cycle;
+    user_noop_benchmark.iterations++;
+    user_noop_benchmark.cycles_total += elapsed;
+    if (elapsed < user_noop_benchmark.cycles_min) {
+        user_noop_benchmark.cycles_min = elapsed;
+    }
+    if (elapsed > user_noop_benchmark.cycles_max) {
+        user_noop_benchmark.cycles_max = elapsed;
+    }
+
+    return frame;
+}
+
 trap_frame_t *user_syscall_dispatch(trap_frame_t *frame)
 {
     if (frame == NULL) {
         PANIC("null user syscall frame");
     }
 
+    const uint64_t dispatch_start_cycle = csr_read_cycle();
     const uint64_t syscall_nr = frame->a7;
     user_syscall_trace(
         TRACE_USER_SYSCALL_ENTER,
@@ -146,6 +194,10 @@ trap_frame_t *user_syscall_dispatch(trap_frame_t *frame)
 
     if (syscall_nr == USER_SYSCALL_ACCEL_MEMSET) {
         return user_accel_syscall_memset(frame);
+    }
+
+    if (syscall_nr == USER_SYSCALL_NOOP) {
+        return user_syscall_noop(frame, dispatch_start_cycle);
     }
 
     user_syscall_require_task(frame);

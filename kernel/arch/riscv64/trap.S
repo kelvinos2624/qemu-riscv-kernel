@@ -358,6 +358,9 @@ machine_trap_restore_frame:
     ld t0, TF_MSTATUS(sp)
     csrw mstatus, t0
 
+    addi t0, sp, TF_SIZE
+    csrw mscratch, t0
+
     ld ra, TF_RA(sp)
     ld gp, TF_GP(sp)
     ld tp, TF_TP(sp)
@@ -389,7 +392,5 @@ machine_trap_restore_frame:
     ld t5, TF_T5(sp)
     ld t6, TF_T6(sp)
 
-    addi t0, sp, TF_SIZE
-    csrw mscratch, t0
     ld sp, TF_SP(sp)
     mret
