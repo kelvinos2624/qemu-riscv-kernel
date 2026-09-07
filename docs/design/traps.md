@@ -151,6 +151,7 @@ The initial ABI uses `a7` as the syscall number, `a0` as the first argument, and
 1: exit(code)
 2: yield() -> 0
 3: sleep(ticks) -> 0
+4: accel_memset(dst, len, value, timeout_ticks) -> status
 ```
 
 The dispatcher owns syscall policy:
@@ -159,6 +160,7 @@ The dispatcher owns syscall policy:
 - report and retire scheduled user-task exits
 - preserve the legacy `first-user` exit continuation
 - route `yield` and `sleep` onto scheduler trap-return mechanisms
+- route accelerator calls to the user/accelerator syscall boundary module
 - panic on unknown syscall numbers
 
 Scheduled user tasks use the Stage 5 trampoline path. Their exit syscall records
@@ -168,10 +170,10 @@ and backing pages. The legacy `first-user` scenario still rewrites the saved
 trap frame to return to an S-mode kernel continuation because it does not run
 inside the scheduler.
 
-This is not a full syscall ABI yet. It is the smallest dispatcher-owned
-foundation needed to prove that scheduled U-mode code can intentionally return
-control to the kernel, request scheduler-visible blocking, and receive a simple
-integer result.
+This is still a narrow syscall ABI. It is now enough to prove that scheduled
+U-mode code can intentionally return control to the kernel, request
+scheduler-visible blocking, receive a simple integer result, and pass a
+validated pointer to a syscall-owned copy boundary.
 
 ## Userspace Runtime
 
@@ -185,6 +187,11 @@ Runtime syscall stubs own the user-side calling surface:
 void user_exit(uint64_t code);
 uint64_t user_yield(void);
 uint64_t user_sleep(uint64_t ticks);
+int user_accel_memset(
+    void *dst,
+    uint32_t len,
+    uint32_t value,
+    uint64_t timeout_ticks);
 ```
 
 Those stubs load the agreed ABI registers and execute `ecall`. They do not own
@@ -195,6 +202,21 @@ The runtime image is linked as text-only at `USER_SPACE_CODE_BASE` and converted
 to a flat binary before being embedded into the kernel image. The current user
 task loader still copies one program blob into one executable user page, so the
 user linker script rejects `.rodata`, `.data`, and `.bss`.
+
+## Blocking User Syscalls
+
+Most user syscalls return directly to the task-owned user trap frame. A syscall
+that performs blocking kernel work can temporarily sleep the current thread on a
+kernel continuation frame instead. When that continuation resumes and returns
+the original user trap frame, the trap return path re-associates the current
+thread with that user frame before entering the trampoline.
+
+The invariant is:
+
+```text
+Even if kernel-side syscall work blocks, returning to U-mode uses the task-owned
+user trap frame and the user-satp trampoline path.
+```
 
 ## ECE350 and STM32 RTOS Connection
 
@@ -215,7 +237,7 @@ the broken invariant.
 
 ## Next Work
 
-- Add pointer-bearing syscalls once usercopy policy at the syscall boundary is
-  ready.
+- Add negative syscall and usercopy validation scenarios for invalid pointers,
+  unsupported syscall numbers, timeout failures, and boundary lengths.
 - Add user data/BSS mappings or a real loader when user programs need globals
   or string literals.

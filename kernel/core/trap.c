@@ -123,6 +123,7 @@ void trap_return_from_handler(trap_frame_t *frame)
 {
     user_task_t *task = thread_current_user_task_for_frame(frame);
     if (task != NULL) {
+        thread_set_current_trap_frame_from_trap(frame);
         trap_return_to_user(task);
     }
 

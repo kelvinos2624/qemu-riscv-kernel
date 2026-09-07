@@ -360,6 +360,73 @@ accel: invalid command error passed
 milestone 21: accelerator timeout/error handling
 ```
 
+## Userspace Accelerator API
+
+The first userspace-facing accelerator operation is a scalar syscall:
+
+```c
+int user_accel_memset(
+    void *dst,
+    uint32_t len,
+    uint32_t value,
+    uint64_t timeout_ticks);
+```
+
+The syscall API intentionally exposes one operation instead of a user descriptor
+format. Userspace passes only the destination pointer, byte count, fill value,
+and timeout. The kernel syscall boundary validates the scheduled task's user
+destination range, allocates a page-backed bounce buffer, submits a normal
+kernel accelerator descriptor that targets the bounce buffer, and copies the
+completed bytes back into userspace.
+
+The isolation invariant is:
+
+```text
+A userspace accelerator request may influence device work, but the device only
+receives kernel-owned physical buffers.
+```
+
+`user_abi.h` owns the syscall-number mechanism. `user_accel.h` owns the
+user-visible accelerator API constants, status codes, maximum transfer size,
+and runtime prototype. Keeping those headers split prevents device-specific
+policy from spreading into the generic syscall-number contract.
+
+The first API accepts `0 < len <= USER_ACCEL_MEMSET_MAX_LEN`, where the maximum
+is one page. The user destination may cross user page boundaries because
+task-aware usercopy validates and copies the range page by page. The bounce
+buffer stays one page because the current accelerator descriptor validation
+requires page-contained device buffers.
+
+The syscall forwards `timeout_ticks` to `accel_submit_sync_timeout()`. Driver
+status values are returned directly when they match the user-visible ABI. A
+syscall-local allocation failure returns `USER_ACCEL_ERR_NO_MEMORY`.
+
+The simulator does not advance independently from a real device thread. The
+`user-accelerator` scenario therefore runs an observer thread that steps the
+simulated accelerator and dispatches pending IRQs while the user task is alive.
+That keeps the test faithful to the Stage 4 interrupt-completion path without
+adding a global hardware event loop yet.
+
+The `user-accelerator` scenario verifies:
+
+- C userspace can call the named accelerator runtime stub
+- the syscall validates the user destination through the scheduled task
+- the accelerator writes a kernel bounce buffer, not the user page
+- successful completion is copied back to the user buffer
+- a blocking user syscall still returns through the user-satp trampoline
+
+The scenario prints:
+
+```text
+scenario: user-accelerator
+user: entering u-mode pc=... sp=... satp=...
+user: accel memset
+user: exited code=...
+milestone 22: user address-space switching
+user: accelerator memset passed
+milestone 26: user accelerator API
+```
+
 ## Course Connection
 
 The ECE350 connection is the distinction between a condition and a notification.

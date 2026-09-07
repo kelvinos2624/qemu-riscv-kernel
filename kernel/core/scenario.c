@@ -44,6 +44,7 @@ static user_task_t user_satp_task;
 static user_task_t user_lifecycle_task;
 static user_task_t syscall_basic_task;
 static user_task_t user_runtime_task;
+static user_task_t user_accelerator_task;
 static size_t user_lifecycle_initial_free;
 static volatile int accel_timeout_submit_started;
 static volatile int accel_timeout_observed;
@@ -62,6 +63,7 @@ static void scenario_user_satp(void) __attribute__((noreturn));
 static void scenario_user_task(void) __attribute__((noreturn));
 static void scenario_syscall_basic(void) __attribute__((noreturn));
 static void scenario_user_runtime(void) __attribute__((noreturn));
+static void scenario_user_accelerator(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
@@ -825,6 +827,69 @@ static void scenario_user_runtime(void)
     console_write_hex64(frame->sp);
     console_write(" satp=");
     console_write_hex64(user_task_satp(&user_runtime_task));
+    console_write("\n");
+
+    thread_start();
+}
+
+static void user_accelerator_observer_thread(void *arg)
+{
+    (void)arg;
+
+    while (user_task_state(&user_accelerator_task) != USER_TASK_DESTROYED) {
+        platform_accel_step();
+        platform_dispatch_pending_irqs();
+        thread_yield();
+    }
+
+    if (user_task_exit_code(&user_accelerator_task) != 0) {
+        PANIC("user accelerator recorded wrong exit code");
+    }
+
+    console_write("user: accelerator memset passed\n");
+    console_write("milestone 26: user accelerator API\n");
+    thread_exit();
+}
+
+static void scenario_user_accelerator(void)
+{
+    console_write("scenario: user-accelerator\n");
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("user accelerator reset failed");
+    }
+
+    const size_t user_program_size =
+        (size_t)(user_runtime_end - user_runtime_start);
+    if (user_task_init(
+            &user_accelerator_task,
+            user_runtime_start,
+            user_program_size
+        ) < 0) {
+        PANIC("user accelerator task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&user_accelerator_task);
+    if (frame == NULL) {
+        PANIC("user accelerator missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user("user-accelerator", &user_accelerator_task) < 0 ||
+        thread_create(
+            "user-accelerator-observer",
+            user_accelerator_observer_thread,
+            NULL
+        ) < 0) {
+        PANIC("user accelerator thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&user_accelerator_task));
     console_write("\n");
 
     thread_start();
@@ -1661,6 +1726,10 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_USER_RUNTIME) {
         scenario_user_runtime();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_USER_ACCELERATOR) {
+        scenario_user_accelerator();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {

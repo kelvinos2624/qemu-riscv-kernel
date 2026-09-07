@@ -5,6 +5,7 @@
 #include "memory/user_space.h"
 #include "memory/usercopy.h"
 #include "memory/vm.h"
+#include "user/task.h"
 
 #include <stdint.h>
 
@@ -33,7 +34,12 @@ static int usercopy_range_end(uintptr_t start, size_t len, uintptr_t *end)
     return USERCOPY_OK;
 }
 
-static int usercopy_validate_range(uintptr_t user_va, size_t len, int write)
+static int usercopy_validate_range_in_space(
+    const vm_space_t *space,
+    uintptr_t user_va,
+    size_t len,
+    int write
+)
 {
     uintptr_t end;
     if (usercopy_range_end(user_va, len, &end) != USERCOPY_OK) {
@@ -55,7 +61,7 @@ static int usercopy_validate_range(uintptr_t user_va, size_t len, int write)
     for (uintptr_t page = first_page;; page += PAGE_SIZE) {
         uintptr_t pa;
         uint64_t flags;
-        if (vm_get_mapping(paging_kernel_space(), page, &pa, &flags) != VM_OK) {
+        if (vm_get_mapping(space, page, &pa, &flags) != VM_OK) {
             return USERCOPY_ERR_INVALID;
         }
 
@@ -70,6 +76,16 @@ static int usercopy_validate_range(uintptr_t user_va, size_t len, int write)
     }
 
     return USERCOPY_OK;
+}
+
+static int usercopy_validate_range(uintptr_t user_va, size_t len, int write)
+{
+    return usercopy_validate_range_in_space(
+        paging_kernel_space(),
+        user_va,
+        len,
+        write
+    );
 }
 
 static void usercopy_restore_sstatus(uint64_t saved_sstatus)
@@ -173,6 +189,127 @@ int copy_to_user(void *user_dst, const void *src, size_t len)
         user_start,
         user_end,
         MCAUSE_STORE_PAGE_FAULT
+    );
+}
+
+int usercopy_task_validate(
+    const user_task_t *task,
+    uintptr_t user_va,
+    size_t len,
+    int write
+)
+{
+    if (!user_task_is_ready(task)) {
+        return USERCOPY_ERR_INVALID;
+    }
+
+    return usercopy_validate_range_in_space(
+        &task->address_space,
+        user_va,
+        len,
+        write
+    );
+}
+
+static int copy_user_task_bytes(
+    const user_task_t *task,
+    void *kernel_ptr,
+    uintptr_t user_va,
+    size_t len,
+    int write_user
+)
+{
+    if (len == 0) {
+        return USERCOPY_OK;
+    }
+
+    int result = usercopy_task_validate(task, user_va, len, write_user);
+    if (result != USERCOPY_OK) {
+        return result;
+    }
+
+    uint8_t *kernel_bytes = kernel_ptr;
+    size_t copied = 0;
+    while (copied < len) {
+        const uintptr_t current_va = user_va + copied;
+        uintptr_t pa;
+        uint64_t flags;
+        if (vm_get_mapping(
+                &task->address_space,
+                current_va,
+                &pa,
+                &flags
+            ) != VM_OK) {
+            return USERCOPY_ERR_INVALID;
+        }
+
+        (void)flags;
+        const size_t page_remaining = PAGE_SIZE - (current_va & PAGE_MASK);
+        size_t chunk = len - copied;
+        if (chunk > page_remaining) {
+            chunk = page_remaining;
+        }
+
+        uint8_t *user_bytes = (uint8_t *)pa;
+        for (size_t i = 0; i < chunk; i++) {
+            if (write_user) {
+                user_bytes[i] = kernel_bytes[copied + i];
+            } else {
+                kernel_bytes[copied + i] = user_bytes[i];
+            }
+        }
+
+        copied += chunk;
+    }
+
+    return USERCOPY_OK;
+}
+
+int copy_from_user_task(
+    const user_task_t *task,
+    void *dst,
+    const void *user_src,
+    size_t len
+)
+{
+    if (len == 0) {
+        return USERCOPY_OK;
+    }
+
+    if (dst == NULL || user_src == NULL) {
+        return USERCOPY_ERR_INVALID;
+    }
+
+    return copy_user_task_bytes(
+        task,
+        dst,
+        (uintptr_t)user_src,
+        len,
+        0
+    );
+}
+
+int copy_to_user_task(
+    const user_task_t *task,
+    void *user_dst,
+    const void *src,
+    size_t len
+)
+{
+    if (len == 0) {
+        return USERCOPY_OK;
+    }
+
+    if (user_dst == NULL || src == NULL) {
+        return USERCOPY_ERR_INVALID;
+    }
+
+    return copy_user_task_bytes(
+        task,
+        (void *)src,
+        (uintptr_t)user_dst,
+        len,
+        1
     );
 }
 

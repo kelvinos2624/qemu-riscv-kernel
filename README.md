@@ -181,6 +181,10 @@ Stage 5 userspace runtime work has started:
   named syscall runtime stubs
 - `user-runtime` smoke scenario proving C user code can call runtime stubs and
   exit through the scheduled task path
+- task-aware usercopy helpers for scheduled user-task address spaces
+- userspace accelerator `memset` syscall using a kernel-owned bounce buffer
+- `user-accelerator` smoke scenario proving C userspace can request
+  accelerator-backed work without exposing user pages to the device
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -213,9 +217,9 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next memory-related milestones are userspace-facing accelerator calls,
-syscall validation, and runtime tracing. The active project milestone is Stage 5
-userspace runtime work.
+The next memory-related milestones are syscall validation, runtime tracing, and
+performance evaluation. The active project milestone is Stage 5 userspace
+runtime work.
 
 Common boot output:
 
@@ -323,6 +327,18 @@ user: exited code=0x0000000000000000
 milestone 22: user address-space switching
 user: runtime stubs passed
 milestone 25: userspace runtime
+```
+
+User accelerator scenario output:
+
+```text
+scenario: user-accelerator
+user: entering u-mode pc=0x0000000000001000 sp=0x0000000040000000 satp=...
+user: accel memset
+user: exited code=0x0000000000000000
+milestone 22: user address-space switching
+user: accelerator memset passed
+milestone 26: user accelerator API
 ```
 
 Usercopy scenario output:
@@ -453,8 +469,9 @@ across many hardware domains:
 - invalid command and invalid buffer handling
 - timeout and recovery paths
 
-Userspace will submit accelerator work through syscalls and a thin runtime
-library. It will not access MMIO directly.
+Userspace now starts submitting accelerator work through syscalls and a thin
+runtime library. The first API is a bounce-buffered `MEMSET`; userspace still
+does not access MMIO directly.
 
 ## Deferred Scheduling Extension
 
@@ -540,6 +557,7 @@ make test SCENARIO=user-satp
 make test SCENARIO=user-task
 make test SCENARIO=syscall-basic
 make test SCENARIO=user-runtime
+make test SCENARIO=user-accelerator
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -565,6 +583,7 @@ make test SCENARIO=user-satp
 make test SCENARIO=user-task
 make test SCENARIO=syscall-basic
 make test SCENARIO=user-runtime
+make test SCENARIO=user-accelerator
 make test SCENARIO=usercopy
 make test SCENARIO=driver-framework
 make test SCENARIO=accelerator-registers
@@ -612,6 +631,8 @@ The current scenarios are:
   `sleep`, and `exit`
 - `user-runtime`: validates the freestanding C userspace runtime entry and
   named syscall stubs
+- `user-accelerator`: validates a C userspace accelerator `memset` runtime API
+  backed by task-aware usercopy and a kernel bounce buffer
 - `usercopy`: validates safe usercopy validation, cross-page copies, and
   recoverable usercopy fault probes
 - `scheduler-sync`: validates timeout-aware mutex blocking and selected
@@ -664,6 +685,7 @@ Stage 5 evidence matrix:
 | PR2 | Real user task/process lifetime | `user-task` | `milestone 23: user task lifecycle` | `make test SCENARIO=user-task` |
 | PR3 | Syscall ABI foundation | `syscall-basic` | `milestone 24: syscall ABI` | `make test SCENARIO=syscall-basic` |
 | PR4 | Userspace runtime and syscall stubs | `user-runtime` | `milestone 25: userspace runtime` | `make test SCENARIO=user-runtime` |
+| PR5 | Userspace accelerator syscall API | `user-accelerator` | `milestone 26: user accelerator API` | `make test SCENARIO=user-accelerator` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -676,16 +698,18 @@ separate user page table, exited user-task resources are reclaimed before a
 destroyed task can be scheduled again, scheduled user syscalls can yield, sleep,
 return success, and exit through the dispatcher, freestanding text-only C user
 code can enter through `_start`, call named runtime syscall stubs, return from
-`user_main()`, and exit with that return code, safe usercopy validates ranges
-before copying, cross-page usercopy succeeds, recoverable usercopy faults return
-an error, one thread times out while waiting for a mutex, the idle task runs
-while all real threads are blocked, a later thread can still acquire the mutex
-after the owner unlocks, the trace dump includes key events such as context
-switches, idle entry, wait timeout, and mutex timeout, and the driver framework
-binds a simulated accelerator device by compatible string before validating
-MMIO-backed driver operations. The accelerator-register scenario proves
-reset-to-idle, synchronous start-to-done, IRQ acknowledgement without state
-reset, invalid start-after-done error handling, and reset priority over start.
+`user_main()`, and exit with that return code, C userspace can request
+accelerator-backed `memset` work through a scalar syscall while the kernel uses
+task-aware usercopy and a bounce buffer for copyback, safe usercopy validates
+ranges before copying, cross-page usercopy succeeds, recoverable usercopy faults
+return an error, one thread times out while waiting for a mutex, the idle task
+runs while all real threads are blocked, a later thread can still acquire the
+mutex after the owner unlocks, the trace dump includes key events such as
+context switches, idle entry, wait timeout, and mutex timeout, and the driver
+framework binds a simulated accelerator device by compatible string before
+validating MMIO-backed driver operations. The accelerator-register scenario
+proves reset-to-idle, synchronous start-to-done, IRQ acknowledgement without
+state reset, invalid start-after-done error handling, and reset priority over start.
 The accelerator-descriptor scenario proves allocator-backed descriptor submission,
 safe page-contained execution, invalid descriptor/range rejection, and
 deterministic lifecycle rejection before reset. The accelerator IRQ-completion

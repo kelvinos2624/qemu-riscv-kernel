@@ -1319,12 +1319,28 @@ user_task_t *thread_current_user_task_for_frame(const trap_frame_t *frame)
     if (frame == NULL ||
         current_thread == NULL ||
         current_thread->user_task == NULL ||
-        current_thread->trap_frame != frame ||
         (frame->mstatus & SSTATUS_SPP) != 0) {
         return NULL;
     }
 
+    if (current_thread->trap_frame == frame) {
+        return current_thread->user_task;
+    }
+
+    if (user_task_trap_frame(current_thread->user_task) != frame) {
+        return NULL;
+    }
+
     return current_thread->user_task;
+}
+
+void thread_set_current_trap_frame_from_trap(trap_frame_t *frame)
+{
+    if (current_thread == NULL || frame == NULL) {
+        return;
+    }
+
+    current_thread->trap_frame = frame;
 }
 
 static void thread_trampoline(void)
