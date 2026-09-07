@@ -181,6 +181,55 @@ SCENARIOS = {
         ],
         "success": "runtime tracing scenario",
     },
+    "benchmark-syscall": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: benchmark-syscall",
+            "user: entering u-mode",
+            "user: exited code=",
+            "milestone 22: user address-space switching",
+            "bench: syscall_noop_task",
+            "bench: syscall_noop_dispatch",
+            "milestone 29: performance evaluation",
+        ],
+        "required_trace_types": [],
+        "required_benchmarks": [
+            "syscall_noop_task",
+            "syscall_noop_dispatch",
+        ],
+        "success": "syscall benchmark scenario",
+    },
+    "benchmark-scheduler": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: benchmark-scheduler",
+            "bench: scheduler_yield_pair",
+            "milestone 29: performance evaluation",
+        ],
+        "required_trace_types": [],
+        "required_benchmarks": [
+            "scheduler_yield_pair",
+        ],
+        "success": "scheduler benchmark scenario",
+    },
+    "benchmark-accelerator": {
+        "expected_sequence": [
+            "milestone 13: kernel paging",
+            "scenario: benchmark-accelerator",
+            "user: entering u-mode",
+            "user: exited code=",
+            "milestone 22: user address-space switching",
+            "bench: accelerator_user_memset",
+            "bench: accelerator_driver_memset",
+            "milestone 29: performance evaluation",
+        ],
+        "required_trace_types": [],
+        "required_benchmarks": [
+            "accelerator_user_memset",
+            "accelerator_driver_memset",
+        ],
+        "success": "accelerator benchmark scenario",
+    },
     "usercopy": {
         "expected_sequence": [
             "milestone 13: kernel paging",
@@ -306,6 +355,7 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("milestone 26:")
         or line.startswith("milestone 27:")
         or line.startswith("milestone 28:")
+        or line.startswith("milestone 29:")
         or line.startswith("milestone 10:")
         or line.startswith("trap: page fault")
         or line.startswith("user: entering u-mode")
@@ -323,10 +373,26 @@ def is_relevant_line(line: str) -> bool:
         or line.startswith("user: task lifecycle cleanup passed")
         or line.startswith("usercopy:")
         or line.startswith("trace:")
+        or line.startswith("bench:")
         or line.startswith("thread: null idle")
         or line.startswith("driver:")
         or line.startswith("accel:")
     )
+
+
+def parse_hex_field(line: str, name: str) -> int:
+    marker = f" {name}="
+    start = line.find(marker)
+    if start < 0:
+        return -1
+    start += len(marker)
+    end = line.find(" ", start)
+    if end < 0:
+        end = len(line)
+    try:
+        return int(line[start:end], 16)
+    except ValueError:
+        return -1
 
 
 def main() -> int:
@@ -349,6 +415,7 @@ def main() -> int:
 
     expected_sequence = scenario_config["expected_sequence"]
     required_trace_types = scenario_config["required_trace_types"]
+    required_benchmarks = scenario_config.get("required_benchmarks", [])
     cmd = [
         qemu,
         "-machine",
@@ -376,6 +443,7 @@ def main() -> int:
     output = []
     observed_sequence = []
     observed_trace_types = set()
+    observed_benchmarks = set()
     expected_index = 0
     deadline = time.monotonic() + TIMEOUT_SECONDS
 
@@ -398,7 +466,25 @@ def main() -> int:
                                     observed_trace_types.add(stripped_line[type_start:type_end])
                                 continue
 
-                            if stripped_line.startswith("trace: begin"):
+                            if stripped_line.startswith("bench: "):
+                                sequence_line = stripped_line.split(
+                                    " iterations=", 1
+                                )[0]
+                                benchmark_name = sequence_line[len("bench: "):]
+                                if (
+                                    parse_hex_field(stripped_line, "iterations") <= 0
+                                    or parse_hex_field(stripped_line, "cycles_total")
+                                    <= 0
+                                ):
+                                    print(
+                                        "qemu smoke test: invalid benchmark line",
+                                        file=sys.stderr,
+                                    )
+                                    print(stripped_line, file=sys.stderr)
+                                    print("".join(output), file=sys.stderr)
+                                    return 1
+                                observed_benchmarks.add(benchmark_name)
+                            elif stripped_line.startswith("trace: begin"):
                                 sequence_line = "trace: begin"
                             elif stripped_line.startswith("trap: page fault"):
                                 sequence_line = stripped_line.split(" scause=", 1)[0]
@@ -446,6 +532,23 @@ def main() -> int:
                                 print("".join(output), file=sys.stderr)
                                 return 1
 
+                            missing_benchmarks = [
+                                benchmark
+                                for benchmark in required_benchmarks
+                                if benchmark not in observed_benchmarks
+                            ]
+                            if missing_benchmarks:
+                                print(
+                                    "qemu smoke test: missing benchmarks",
+                                    file=sys.stderr,
+                                )
+                                print(
+                                    f"missing: {missing_benchmarks}",
+                                    file=sys.stderr,
+                                )
+                                print("".join(output), file=sys.stderr)
+                                return 1
+
                             print(
                                 f"qemu smoke test: observed {scenario_config['success']}"
                             )
@@ -470,6 +573,7 @@ def main() -> int:
     )
     print(f"observed sequence: {observed_sequence}", file=sys.stderr)
     print(f"observed trace types: {sorted(observed_trace_types)}", file=sys.stderr)
+    print(f"observed benchmarks: {sorted(observed_benchmarks)}", file=sys.stderr)
     print("".join(output), file=sys.stderr)
     return 1
 

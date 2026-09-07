@@ -10,11 +10,11 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 OBJDUMP := $(CROSS_COMPILE)objdump
 GDB := $(CROSS_COMPILE)gdb
 QEMU := qemu-system-riscv64
-CONFIG_TRACE ?= 1
-SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic user-runtime user-accelerator syscall-negative runtime-tracing usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
+SCENARIOS := allocator heap vm page-fault user-space first-user user-satp user-task syscall-basic user-runtime user-accelerator syscall-negative runtime-tracing benchmark-syscall benchmark-scheduler benchmark-accelerator usercopy scheduler-sync driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 STAGE4_SCENARIOS := driver-framework accelerator-registers accelerator-descriptors accelerator-irq-completion accelerator-timeout-error-handling
 DEFAULT_SCENARIO := scheduler-sync
 SCENARIO ?= $(DEFAULT_SCENARIO)
+CONFIG_TRACE ?= $(if $(filter benchmark-%,$(SCENARIO)),0,1)
 SCENARIO_ID_allocator := 1
 SCENARIO_ID_heap := 2
 SCENARIO_ID_vm := 3
@@ -35,6 +35,9 @@ SCENARIO_ID_user-runtime := 17
 SCENARIO_ID_user-accelerator := 18
 SCENARIO_ID_syscall-negative := 19
 SCENARIO_ID_runtime-tracing := 20
+SCENARIO_ID_benchmark-syscall := 21
+SCENARIO_ID_benchmark-scheduler := 22
+SCENARIO_ID_benchmark-accelerator := 23
 CONFIG_SCENARIO_ID := $(SCENARIO_ID_$(SCENARIO))
 
 ifeq ($(CONFIG_SCENARIO_ID),)
@@ -103,6 +106,8 @@ USER_PROGRAM_SRC_user-runtime := user/programs/runtime_main.c
 USER_PROGRAM_SRC_user-accelerator := user/programs/accelerator_main.c
 USER_PROGRAM_SRC_syscall-negative := user/programs/syscall_negative_main.c
 USER_PROGRAM_SRC_runtime-tracing := user/programs/runtime_tracing_main.c
+USER_PROGRAM_SRC_benchmark-syscall := user/programs/benchmark_syscall_main.c
+USER_PROGRAM_SRC_benchmark-accelerator := user/programs/benchmark_accelerator_main.c
 USER_PROGRAM_SRC := $(or $(USER_PROGRAM_SRC_$(SCENARIO)),user/programs/runtime_main.c)
 
 USER_RUNTIME_SRCS := \

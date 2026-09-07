@@ -1,4 +1,5 @@
 #include "core/kernel.h"
+#include "core/scenario.h"
 #include "core/thread.h"
 #include "core/trace.h"
 #include "core/trap.h"
@@ -51,6 +52,11 @@ static void user_accel_reset_after_timeout(void)
     if (accel_reset() != ACCEL_OK) {
         PANIC("accelerator timeout reset failed");
     }
+}
+
+static int user_accel_should_report(void)
+{
+    return CONFIG_SCENARIO != SCENARIO_BENCHMARK_ACCELERATOR;
 }
 
 static int user_accel_memset_impl(
@@ -154,14 +160,16 @@ trap_frame_t *user_accel_syscall_memset(trap_frame_t *frame)
         USER_SYSCALL_ACCEL_MEMSET,
         (uint64_t)(int64_t)result
     );
-    if (result == USER_ACCEL_OK) {
-        console_write("user: accel memset\n");
-    } else if (result == USER_ACCEL_ERR_TIMEOUT) {
-        console_write("user: accel memset timeout\n");
-    } else if (result == USER_ACCEL_ERR_INVALID) {
-        console_write("user: accel memset invalid\n");
-    } else {
-        console_write("user: accel memset error\n");
+    if (user_accel_should_report()) {
+        if (result == USER_ACCEL_OK) {
+            console_write("user: accel memset\n");
+        } else if (result == USER_ACCEL_ERR_TIMEOUT) {
+            console_write("user: accel memset timeout\n");
+        } else if (result == USER_ACCEL_ERR_INVALID) {
+            console_write("user: accel memset invalid\n");
+        } else {
+            console_write("user: accel memset error\n");
+        }
     }
     return frame;
 }

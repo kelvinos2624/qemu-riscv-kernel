@@ -1,5 +1,6 @@
 #include "arch/riscv64/accel_platform.h"
 #include "arch/riscv64/csr.h"
+#include "arch/riscv64/irq.h"
 #include "core/kernel.h"
 #include "core/scenario.h"
 #include "core/sync.h"
@@ -17,11 +18,14 @@
 #include "memory/user_space.h"
 #include "memory/usercopy.h"
 #include "memory/vm.h"
+#include "user/syscall.h"
 #include "user/task.h"
 
 #ifndef CONFIG_SCENARIO
 #define CONFIG_SCENARIO SCENARIO_SCHEDULER_SYNC
 #endif
+
+#define BENCHMARK_ACCEL_DRIVER_ITERATIONS 8u
 
 static mutex_t demo_mutex;
 static volatile int demo_shared_counter;
@@ -48,12 +52,21 @@ static user_task_t user_runtime_task;
 static user_task_t user_accelerator_task;
 static user_task_t syscall_negative_task;
 static user_task_t runtime_tracing_task;
+static user_task_t benchmark_syscall_task;
+static user_task_t benchmark_accelerator_task;
 static size_t user_lifecycle_initial_free;
 static volatile int accel_timeout_submit_started;
 static volatile int accel_timeout_observed;
 static volatile int accel_timeout_late_irq_done;
 static volatile int accel_timeout_reuse_started;
 static volatile int accel_timeout_reuse_dispatched;
+static uint64_t benchmark_syscall_start_cycle;
+static uint64_t benchmark_scheduler_start_cycle;
+static volatile uint32_t benchmark_scheduler_finished;
+static volatile int benchmark_accelerator_user_done;
+static volatile int benchmark_accelerator_driver_done;
+static accel_cmd_t *benchmark_accelerator_driver_cmd;
+static uint8_t *benchmark_accelerator_driver_buffer;
 
 static void scenario_idle_forever(void) __attribute__((noreturn));
 static void scenario_allocator(void) __attribute__((noreturn));
@@ -69,6 +82,9 @@ static void scenario_user_runtime(void) __attribute__((noreturn));
 static void scenario_user_accelerator(void) __attribute__((noreturn));
 static void scenario_syscall_negative(void) __attribute__((noreturn));
 static void scenario_runtime_tracing(void) __attribute__((noreturn));
+static void scenario_benchmark_syscall(void) __attribute__((noreturn));
+static void scenario_benchmark_scheduler(void) __attribute__((noreturn));
+static void scenario_benchmark_accelerator(void) __attribute__((noreturn));
 static void scenario_usercopy(void) __attribute__((noreturn));
 static void scenario_scheduler_sync(void) __attribute__((noreturn));
 static void scenario_driver_framework(void) __attribute__((noreturn));
@@ -109,6 +125,61 @@ static void memory_zero(void *ptr, size_t size)
     for (size_t i = 0; i < size; i++) {
         bytes[i] = 0;
     }
+}
+
+static uint64_t benchmark_average(uint64_t total, uint64_t iterations)
+{
+    return iterations == 0 ? 0 : total / iterations;
+}
+
+static void benchmark_print_common(
+    const char *name,
+    uint64_t iterations,
+    uint64_t cycles_total)
+{
+    console_write("bench: ");
+    console_write(name);
+    console_write(" iterations=");
+    console_write_hex64(iterations);
+    console_write(" cycles_total=");
+    console_write_hex64(cycles_total);
+    console_write(" cycles_avg=");
+    console_write_hex64(benchmark_average(cycles_total, iterations));
+}
+
+static void benchmark_print_line(
+    const char *name,
+    uint64_t iterations,
+    uint64_t cycles_total)
+{
+    benchmark_print_common(name, iterations, cycles_total);
+    console_write("\n");
+}
+
+static void benchmark_print_bytes_line(
+    const char *name,
+    uint64_t iterations,
+    uint64_t bytes_total,
+    uint64_t cycles_total)
+{
+    benchmark_print_common(name, iterations, cycles_total);
+    console_write(" bytes_total=");
+    console_write_hex64(bytes_total);
+    console_write("\n");
+}
+
+static void benchmark_print_syscall_dispatch_line(
+    const user_syscall_benchmark_t *benchmark)
+{
+    benchmark_print_common(
+        "syscall_noop_dispatch",
+        benchmark->iterations,
+        benchmark->cycles_total);
+    console_write(" cycles_min=");
+    console_write_hex64(benchmark->cycles_min);
+    console_write(" cycles_max=");
+    console_write_hex64(benchmark->cycles_max);
+    console_write("\n");
 }
 
 static void scenario_init_memset_cmd(
@@ -1042,6 +1113,297 @@ static void scenario_runtime_tracing(void)
     thread_start();
 }
 
+static void benchmark_syscall_observer_thread(void *arg)
+{
+    (void)arg;
+
+    while (user_task_state(&benchmark_syscall_task) != USER_TASK_DESTROYED) {
+        thread_yield();
+    }
+
+    const uint64_t total_cycles =
+        csr_read_cycle() - benchmark_syscall_start_cycle;
+    const user_syscall_benchmark_t syscall_benchmark =
+        user_syscall_benchmark_snapshot();
+
+    if (user_task_exit_code(&benchmark_syscall_task) != 0 ||
+        syscall_benchmark.iterations != USER_BENCH_SYSCALL_ITERATIONS) {
+        PANIC("syscall benchmark failed");
+    }
+
+    benchmark_print_line(
+        "syscall_noop_task",
+        USER_BENCH_SYSCALL_ITERATIONS,
+        total_cycles);
+    benchmark_print_syscall_dispatch_line(&syscall_benchmark);
+    console_write("milestone 29: performance evaluation\n");
+    thread_exit();
+}
+
+static void scenario_benchmark_syscall(void)
+{
+    console_write("scenario: benchmark-syscall\n");
+
+    user_syscall_benchmark_reset();
+
+    const size_t user_program_size =
+        (size_t)(user_runtime_end - user_runtime_start);
+    if (user_task_init(
+            &benchmark_syscall_task,
+            user_runtime_start,
+            user_program_size
+        ) < 0) {
+        PANIC("benchmark syscall task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&benchmark_syscall_task);
+    if (frame == NULL) {
+        PANIC("benchmark syscall missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user("benchmark-syscall", &benchmark_syscall_task) < 0 ||
+        thread_create(
+            "benchmark-syscall-observer",
+            benchmark_syscall_observer_thread,
+            NULL
+        ) < 0) {
+        PANIC("benchmark syscall thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&benchmark_syscall_task));
+    console_write("\n");
+
+    benchmark_syscall_start_cycle = csr_read_cycle();
+    thread_start();
+}
+
+static void benchmark_scheduler_worker_thread(void *arg)
+{
+    (void)arg;
+
+    for (uint32_t i = 0; i < USER_BENCH_SYSCALL_ITERATIONS; i++) {
+        thread_yield();
+    }
+
+    irq_state_t irq_state = irq_save();
+    benchmark_scheduler_finished++;
+    const int is_last = benchmark_scheduler_finished == 2u;
+    irq_restore(irq_state);
+
+    if (is_last) {
+        const uint64_t total_cycles =
+            csr_read_cycle() - benchmark_scheduler_start_cycle;
+        benchmark_print_line(
+            "scheduler_yield_pair",
+            2u * USER_BENCH_SYSCALL_ITERATIONS,
+            total_cycles);
+        console_write("milestone 29: performance evaluation\n");
+    }
+
+    thread_exit();
+}
+
+static void scenario_benchmark_scheduler(void)
+{
+    console_write("scenario: benchmark-scheduler\n");
+
+    benchmark_scheduler_finished = 0;
+    thread_init();
+    if (thread_create(
+            "benchmark-scheduler-a",
+            benchmark_scheduler_worker_thread,
+            NULL
+        ) < 0 ||
+        thread_create(
+            "benchmark-scheduler-b",
+            benchmark_scheduler_worker_thread,
+            NULL
+        ) < 0) {
+        PANIC("benchmark scheduler thread create failed");
+    }
+
+    benchmark_scheduler_start_cycle = csr_read_cycle();
+    thread_start();
+}
+
+static void benchmark_accelerator_driver_worker_thread(void *arg)
+{
+    (void)arg;
+
+    while (!benchmark_accelerator_driver_done) {
+        platform_accel_step();
+        platform_dispatch_pending_irqs();
+        thread_yield();
+    }
+
+    thread_exit();
+}
+
+static void benchmark_accelerator_driver_submitter_thread(void *arg)
+{
+    (void)arg;
+
+    const uint64_t start_cycle = csr_read_cycle();
+    for (uint32_t iteration = 0; iteration < BENCHMARK_ACCEL_DRIVER_ITERATIONS;
+         iteration++) {
+        const uint8_t value = (uint8_t)(0x61u + iteration);
+
+        if (accel_reset() != ACCEL_OK) {
+            PANIC("benchmark accelerator driver reset failed");
+        }
+
+        for (size_t i = 0; i < PAGE_SIZE; i++) {
+            benchmark_accelerator_driver_buffer[i] = 0xccu;
+        }
+
+        scenario_init_memset_cmd(
+            benchmark_accelerator_driver_cmd,
+            benchmark_accelerator_driver_buffer + 128u,
+            USER_BENCH_ACCEL_LEN,
+            value);
+
+        if (accel_submit_sync_timeout(
+                benchmark_accelerator_driver_cmd,
+                100u
+            ) != ACCEL_OK) {
+            PANIC("benchmark accelerator driver submit failed");
+        }
+
+        scenario_expect_memset_range(
+            benchmark_accelerator_driver_buffer,
+            128u,
+            USER_BENCH_ACCEL_LEN,
+            value);
+    }
+
+    const uint64_t total_cycles = csr_read_cycle() - start_cycle;
+    benchmark_print_bytes_line(
+        "accelerator_driver_memset",
+        BENCHMARK_ACCEL_DRIVER_ITERATIONS,
+        (uint64_t)BENCHMARK_ACCEL_DRIVER_ITERATIONS * USER_BENCH_ACCEL_LEN,
+        total_cycles);
+
+    benchmark_accelerator_driver_done = 1;
+    page_free(benchmark_accelerator_driver_cmd);
+    page_free(benchmark_accelerator_driver_buffer);
+    console_write("milestone 29: performance evaluation\n");
+    thread_exit();
+}
+
+static void benchmark_accelerator_start_driver_phase(void)
+{
+    benchmark_accelerator_driver_done = 0;
+    benchmark_accelerator_driver_cmd = page_alloc();
+    benchmark_accelerator_driver_buffer = page_alloc();
+    if (benchmark_accelerator_driver_cmd == NULL ||
+        benchmark_accelerator_driver_buffer == NULL) {
+        PANIC("benchmark accelerator driver pages unavailable");
+    }
+
+    memory_zero(benchmark_accelerator_driver_cmd, PAGE_SIZE);
+    memory_zero(benchmark_accelerator_driver_buffer, PAGE_SIZE);
+
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("benchmark accelerator driver reset failed");
+    }
+
+    if (thread_create(
+            "benchmark-accel-driver-submit",
+            benchmark_accelerator_driver_submitter_thread,
+            NULL
+        ) < 0 ||
+        thread_create(
+            "benchmark-accel-driver-worker",
+            benchmark_accelerator_driver_worker_thread,
+            NULL
+        ) < 0) {
+        PANIC("benchmark accelerator driver thread create failed");
+    }
+}
+
+static void benchmark_accelerator_observer_thread(void *arg)
+{
+    (void)arg;
+
+    const uint64_t start_cycle = csr_read_cycle();
+    while (user_task_state(&benchmark_accelerator_task) !=
+           USER_TASK_DESTROYED) {
+        platform_accel_step();
+        platform_dispatch_pending_irqs();
+        thread_yield();
+    }
+
+    const uint64_t total_cycles = csr_read_cycle() - start_cycle;
+    if (user_task_exit_code(&benchmark_accelerator_task) != 0) {
+        PANIC("benchmark accelerator user task failed");
+    }
+
+    benchmark_print_bytes_line(
+        "accelerator_user_memset",
+        USER_BENCH_ACCEL_ITERATIONS,
+        (uint64_t)USER_BENCH_ACCEL_ITERATIONS * USER_BENCH_ACCEL_LEN,
+        total_cycles);
+
+    benchmark_accelerator_user_done = 1;
+    benchmark_accelerator_start_driver_phase();
+    thread_exit();
+}
+
+static void scenario_benchmark_accelerator(void)
+{
+    console_write("scenario: benchmark-accelerator\n");
+
+    benchmark_accelerator_user_done = 0;
+    benchmark_accelerator_driver_done = 0;
+    if (accel_reset() != ACCEL_OK) {
+        PANIC("benchmark accelerator reset failed");
+    }
+
+    const size_t user_program_size =
+        (size_t)(user_runtime_end - user_runtime_start);
+    if (user_task_init(
+            &benchmark_accelerator_task,
+            user_runtime_start,
+            user_program_size
+        ) < 0) {
+        PANIC("benchmark accelerator task init failed");
+    }
+
+    trap_frame_t *frame = user_task_trap_frame(&benchmark_accelerator_task);
+    if (frame == NULL) {
+        PANIC("benchmark accelerator missing trap frame");
+    }
+
+    thread_init();
+    if (thread_create_user(
+            "benchmark-accelerator",
+            &benchmark_accelerator_task
+        ) < 0 ||
+        thread_create(
+            "benchmark-accelerator-observer",
+            benchmark_accelerator_observer_thread,
+            NULL
+        ) < 0) {
+        PANIC("benchmark accelerator thread create failed");
+    }
+
+    console_write("user: entering u-mode pc=");
+    console_write_hex64(frame->mepc);
+    console_write(" sp=");
+    console_write_hex64(frame->sp);
+    console_write(" satp=");
+    console_write_hex64(user_task_satp(&benchmark_accelerator_task));
+    console_write("\n");
+
+    thread_start();
+}
+
 static void expect_usercopy_invalid(int result, const char *name)
 {
     if (result != USERCOPY_ERR_INVALID) {
@@ -1885,6 +2247,18 @@ void scenario_run(void)
 
     if (CONFIG_SCENARIO == SCENARIO_RUNTIME_TRACING) {
         scenario_runtime_tracing();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_BENCHMARK_SYSCALL) {
+        scenario_benchmark_syscall();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_BENCHMARK_SCHEDULER) {
+        scenario_benchmark_scheduler();
+    }
+
+    if (CONFIG_SCENARIO == SCENARIO_BENCHMARK_ACCELERATOR) {
+        scenario_benchmark_accelerator();
     }
 
     if (CONFIG_SCENARIO == SCENARIO_USERCOPY) {

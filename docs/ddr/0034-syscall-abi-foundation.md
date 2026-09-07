@@ -38,6 +38,11 @@ USER_SYSCALL_YIELD = 2
 USER_SYSCALL_SLEEP = 3
 ```
 
+Later Stage 5 work adds `USER_SYSCALL_ACCEL_MEMSET` for the userspace
+accelerator API and `USER_SYSCALL_NOOP` as a minimal benchmark syscall. `noop`
+returns `USER_SYSCALL_OK` and exists to measure dispatcher overhead without
+granting userspace direct cycle-counter access.
+
 `trap.c` owns only trap classification. When it observes a U-mode `ecall`, it
 calls `user_syscall_dispatch(frame)`.
 

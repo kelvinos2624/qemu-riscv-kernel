@@ -57,6 +57,11 @@ uint64_t user_yield(void)
     return user_syscall0(USER_SYSCALL_YIELD);
 }
 
+uint64_t user_noop(void)
+{
+    return user_syscall0(USER_SYSCALL_NOOP);
+}
+
 uint64_t user_sleep(uint64_t ticks)
 {
     return user_syscall1(USER_SYSCALL_SLEEP, ticks);
