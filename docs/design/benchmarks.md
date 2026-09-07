@@ -82,4 +82,3 @@ Benchmarks must not:
 
 Trace-enabled builds still work, but benchmark scenarios default to
 `CONFIG_TRACE=0` so the normal smoke path measures without trace instrumentation.
-
