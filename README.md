@@ -160,7 +160,7 @@ Stage 3 virtual memory and allocation foundations are complete:
 - `SSTATUS_SUM` enabled only inside the interrupt-masked copy window
 - cross-page usercopy scenario coverage
 
-Stage 5 userspace runtime work has started:
+Stage 5 userspace runtime work is complete:
 
 - fixed high Sv39 trampoline and trap-context virtual addresses
 - supervisor-only trampoline mapping in both kernel and user page tables
@@ -199,6 +199,7 @@ Stage 5 userspace runtime work has started:
 - `USER_SYSCALL_NOOP` as a minimal dispatcher benchmark syscall
 - `benchmark-syscall`, `benchmark-scheduler`, and `benchmark-accelerator`
   smoke scenarios proving structured cycle-count output
+- `make test-stage5` grouped smoke target covering milestones 22 through 29
 
 Stage 4 driver framework and simulated accelerator work is complete:
 
@@ -231,7 +232,7 @@ Stage 4 driver framework and simulated accelerator work is complete:
 - late accelerator IRQ acknowledgement after timeout without descriptor result
   rewrite
 
-The next project milestone is Stage 5 integration cleanup.
+Stage 5 is complete through grouped smoke evidence over milestones 22 through 29.
 
 Common boot output:
 
@@ -677,6 +678,7 @@ make test SCENARIO=accelerator-descriptors
 make test SCENARIO=accelerator-irq-completion
 make test SCENARIO=accelerator-timeout-error-handling
 make test-stage4
+make test-stage5
 make clean
 make toolcheck
 ```
@@ -788,6 +790,7 @@ Stage 5 evidence matrix:
 | PR6 | Syscall and usercopy negative validation | `syscall-negative` | `milestone 27: syscall validation` | `make test SCENARIO=syscall-negative` |
 | PR7 | Runtime and accelerator trace infrastructure | `runtime-tracing` | `milestone 28: runtime tracing` | `make test SCENARIO=runtime-tracing` |
 | PR8 | Latency and throughput benchmark scenarios | `benchmark-syscall`, `benchmark-scheduler`, `benchmark-accelerator` | `milestone 29: performance evaluation` | `make test SCENARIO=benchmark-syscall`; `make test SCENARIO=benchmark-scheduler`; `make test SCENARIO=benchmark-accelerator` |
+| PR9 | Stage 5 integration cleanup | all Stage 5 scenarios | milestones 22-29 | `make test-stage5` |
 
 The current tests verify that the allocator initializes and survives its boot
 self-test, the heap lazily grows size-class pools and reuses/zeroes blocks, the
@@ -837,7 +840,7 @@ Planned test categories:
 - scheduler fairness and preemption tests
 - allocator invariant tests
 - driver completion and timeout tests
-- Stage 5 integration cleanup and regression review
+- future stage integration cleanup and regression review
 
 ## Documentation Strategy
 
