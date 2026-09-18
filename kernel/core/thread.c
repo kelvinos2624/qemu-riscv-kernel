@@ -193,20 +193,15 @@ static int wait_queue_remove(wait_queue_t *queue, tid_t tid)
         return -1;
     }
 
-    uint16_t write = 0;
-    for (uint16_t i = 0; i < queue->count; i++) {
-        uint16_t index = (uint16_t)((queue->head + i) % (THREAD_MAX - 1));
-        tid_t queued_tid = queue->tids[index];
-        if (i == found) {
-            continue;
-        }
-        queue->tids[write] = queued_tid;
-        write++;
+    /* Close the gap in ring order without overwriting unread entries. */
+    for (uint16_t i = found; i + 1u < queue->count; i++) {
+        uint16_t dst = (uint16_t)((queue->head + i) % (THREAD_MAX - 1));
+        uint16_t src = (uint16_t)((queue->head + i + 1u) % (THREAD_MAX - 1));
+        queue->tids[dst] = queue->tids[src];
     }
 
-    queue->head = 0;
     queue->count--;
-    queue->tail = queue->count;
+    queue->tail = (uint16_t)((queue->head + queue->count) % (THREAD_MAX - 1));
     return 0;
 }
 
